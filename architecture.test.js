@@ -909,10 +909,18 @@ async function runBackgroundScannerTests() {
   assert.equal(storage[cacheKey].team.result.arenaKind, "team");
   assert.equal(storage[cacheKey].single.result.opponents[0].opponent.id, "111");
   assert.equal(storage[cacheKey].team.result.opponents[0].opponent.id, "222");
+  assert.equal(storage[cacheKey].single.result.opponents[0].character.doll, 1);
   assert.equal(storage[statusKey].single.state, "ready");
   assert.equal(storage[statusKey].team.state, "ready");
   assert.equal(storage[statusKey].single.profileTotal, 1);
   assert.equal(storage[statusKey].team.profileTotal, 6);
+
+  const singleProfileFetch = calls
+    .filter((url) => isProfileFetch(url))
+    .map((url) => new URL(url))
+    .find((url) => url.searchParams.get("p") === "111");
+  assert.ok(singleProfileFetch);
+  assert.equal(singleProfileFetch.searchParams.get("doll"), "1");
 
   const teamProgressWrites = setCalls
     .map((call) => call[statusKey]?.team)

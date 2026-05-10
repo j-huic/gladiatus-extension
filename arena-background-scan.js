@@ -482,18 +482,21 @@
 
   async function scanOpponentEntry(entry, formula, options = {}) {
     let countedBaseProfile = false;
+    const arenaKind = entry.opponent.arenaKind || "single";
+    let profileUrl = entry.opponent.profileUrl;
     try {
-      const html = await fetchProfileHtml(entry.opponent.profileUrl);
+      profileUrl = profileUrlForArenaKind(profileUrl, arenaKind);
+      const html = await fetchProfileHtml(profileUrl);
       await incrementProfileProgress(options.progress);
       countedBaseProfile = true;
-      return entry.opponent.arenaKind === "team"
+      return arenaKind === "team"
         ? await scanTeamOpponent(entry, html, formula, options)
-        : scanSingleOpponent(entry, html, formula);
+        : scanSingleOpponent(entry, html, formula, profileUrl);
     } catch (error) {
       if (!countedBaseProfile) await incrementProfileProgress(options.progress);
       log("opponent profile scan failed", {
         name: entry.opponent.name,
-        profileUrl: safeUrl(entry.opponent.profileUrl),
+        profileUrl: safeUrl(profileUrl),
         error: error.message || String(error)
       });
       return {
@@ -506,9 +509,11 @@
     }
   }
 
-  function scanSingleOpponent(entry, html, formula) {
+  function scanSingleOpponent(entry, html, formula, profileUrl) {
     const character = parseCharacterFromHtml(html, {
       ...entry.opponent,
+      profileUrl: profileUrl || entry.opponent.profileUrl,
+      doll: 1,
       role: "duel",
       roleLabel: ARENA.roleSectionLabels.duel
     });
@@ -523,6 +528,12 @@
       formulaSection: scored.sectionKey,
       character
     };
+  }
+
+  function profileUrlForArenaKind(rawUrl, arenaKind) {
+    const url = new URL(String(rawUrl || ""));
+    if (arenaKind === "single") url.searchParams.set("doll", "1");
+    return url.href;
   }
 
   async function scanTeamOpponent(entry, html, formula, options = {}) {
