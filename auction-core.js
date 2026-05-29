@@ -1,5 +1,6 @@
 (() => {
   const root = typeof globalThis !== "undefined" ? globalThis : window;
+  const pageDocument = root.document || null;
   const CORE_VERSION = "auction-core-v3";
   const PAGE_BRIDGE_REQUEST_SOURCE = "glad-ah-extension-v3";
   const PAGE_BRIDGE_RESPONSE_SOURCE = "glad-ah-page-v3";
@@ -22,8 +23,8 @@
   const MERCENARY_EQUIPMENT_SCAN_TYPES = SCHEMA.mercenaryEquipmentScanCategories;
 
   // Page and tooltip parsing
-  function isAuctionPage(doc = document) {
-    return isAuctionPageUrl(doc.location?.href || window.location.href);
+  function isAuctionPage(doc = pageDocument) {
+    return isAuctionPageUrl(doc?.location?.href || root.location?.href || "");
   }
 
   function isAuctionPageUrl(url) {
@@ -41,10 +42,19 @@
     return SCHEMA.keyForTooltipStat(name);
   }
 
-  function stripHtml(value, doc = document) {
-    const scratch = doc.createElement("div");
-    scratch.innerHTML = String(value || "");
-    return (scratch.textContent || scratch.innerText || "").replace(/\s+/g, " ").trim();
+  function stripHtml(value, doc = pageDocument) {
+    if (doc?.createElement) {
+      const scratch = doc.createElement("div");
+      scratch.innerHTML = String(value || "");
+      return (scratch.textContent || scratch.innerText || "").replace(/\s+/g, " ").trim();
+    }
+
+    return decodeHtml(String(value || "")
+      .replace(/\\\//g, "/")
+      .replace(/<br\s*\/?>/gi, " ")
+      .replace(/<[^>]*>/g, " "))
+      .replace(/\s+/g, " ")
+      .trim();
   }
 
   function parseInteger(value) {
@@ -86,8 +96,12 @@
     return total.count ? { min: total.min, max: total.max } : null;
   }
 
-  function parseTooltipLines(icon, doc = icon.ownerDocument || document) {
+  function parseTooltipLines(icon, doc = icon.ownerDocument || pageDocument) {
     const raw = icon.dataset?.tooltip || icon.getAttribute("data-tooltip") || "";
+    return parseTooltipLinesFromValue(raw, doc);
+  }
+
+  function parseTooltipLinesFromValue(raw, doc = pageDocument) {
     if (!raw) return [];
 
     try {
@@ -192,8 +206,8 @@
     return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   }
 
-  function getFilterForm(doc = document) {
-    return Array.from(doc.querySelectorAll("#content form, form"))
+  function getFilterForm(doc = pageDocument) {
+    return Array.from(doc?.querySelectorAll?.("#content form, form") || [])
       .find((form) => form.querySelector("select[name='itemType']"));
   }
 
@@ -213,8 +227,48 @@
     };
   }
 
-  function makeAuctionUrl(ttype, baseHref = window.location.href) {
-    const url = new URL(baseHref, window.location.href);
+  function readFormFields(form) {
+    if (typeof FormData === "undefined") return [];
+    return Array.from(new FormData(form).entries())
+      .map(([name, value]) => [String(name), String(value)]);
+  }
+
+  function createAuctionScanRequest(doc = pageDocument) {
+    if (!isAuctionPage(doc)) {
+      throw new Error("Open a Gladiatus auction page before scanning.");
+    }
+
+    const filterForm = getFilterForm(doc);
+    if (!filterForm) {
+      throw new Error("Could not find the auction filter form.");
+    }
+
+    const sourceUrl = doc?.location?.href || root.location?.href || "";
+    const sharedFilters = readSharedFilterValues(filterForm);
+    const formFields = readFormFields(filterForm);
+
+    return {
+      sourceUrl,
+      requestedAt: new Date().toISOString(),
+      sharedFilters,
+      formFields,
+      sources: [
+        {
+          label: "Gladiator necessities",
+          url: findAuctionTypeUrl(doc, /gladiator/i, "", sourceUrl),
+          categories: MAIN_SCAN_TYPES
+        },
+        {
+          label: "Mercenary necessities",
+          url: findAuctionTypeUrl(doc, /mercenary/i, "3", sourceUrl),
+          categories: MERCENARY_EQUIPMENT_SCAN_TYPES
+        }
+      ]
+    };
+  }
+
+  function makeAuctionUrl(ttype, baseHref = root.location?.href || pageDocument?.location?.href || "") {
+    const url = new URL(baseHref);
     url.searchParams.set("mod", "auction");
     url.searchParams.delete("submod");
 
@@ -227,12 +281,12 @@
     return url.href;
   }
 
-  function findAuctionTypeUrl(doc, labelPattern, fallbackTtype) {
-    const links = Array.from(doc.querySelectorAll("a[href]"))
+  function findAuctionTypeUrl(doc, labelPattern, fallbackTtype, baseHref = doc?.location?.href || root.location?.href || "") {
+    const links = Array.from(doc?.querySelectorAll?.("a[href]") || [])
       .map((link) => {
         try {
           return {
-            href: new URL(link.getAttribute("href"), window.location.href).href,
+            href: new URL(link.getAttribute("href"), baseHref).href,
             text: stripHtml(link.textContent || "", doc)
           };
         } catch {
@@ -254,13 +308,14 @@
     const byTtype = links.find((link) => new URL(link.href).searchParams.get("ttype") === fallbackTtype);
     if (byTtype) return byTtype.href;
 
-    return makeAuctionUrl(fallbackTtype || "");
+    return makeAuctionUrl(fallbackTtype || "", baseHref);
   }
 
   function isCurrentDocumentUrl(url) {
     try {
-      const current = new URL(window.location.href);
-      const candidate = new URL(url, window.location.href);
+      const baseHref = root.location?.href || pageDocument?.location?.href || "";
+      const current = new URL(baseHref);
+      const candidate = new URL(url, baseHref);
       current.hash = "";
       candidate.hash = "";
       return current.href === candidate.href;
@@ -287,7 +342,7 @@
       throw new Error("Open a Gladiatus auction page before scanning.");
     }
 
-    const filterForm = getFilterForm(document);
+    const filterForm = getFilterForm(pageDocument);
     if (!filterForm) {
       throw new Error("Could not find the auction filter form.");
     }
@@ -331,8 +386,8 @@
   }
 
   async function resolveAuctionScanSources(scanWarnings) {
-    const mainUrl = findAuctionTypeUrl(document, /gladiator/i, "");
-    const mercenaryUrl = findAuctionTypeUrl(document, /mercenary/i, "3");
+    const mainUrl = findAuctionTypeUrl(pageDocument, /gladiator/i, "");
+    const mercenaryUrl = findAuctionTypeUrl(pageDocument, /mercenary/i, "3");
 
     return [
       await resolveAuctionScanSource({
@@ -352,7 +407,7 @@
 
   async function resolveAuctionScanSource({ label, url, categories, scanWarnings }) {
     try {
-      const doc = isCurrentDocumentUrl(url) ? document : await loadAuctionDocument(url);
+      const doc = isCurrentDocumentUrl(url) ? pageDocument : await loadAuctionDocument(url);
       return {
         label,
         url,
@@ -389,24 +444,29 @@
   }
 
   async function fetchDocument(url, options) {
-    const response = await fetch(url, options);
+    if (typeof root.fetch !== "function" || typeof root.DOMParser !== "function") {
+      throw new Error("Auction document loading needs a browser page context.");
+    }
+
+    const response = await root.fetch(url, options);
     if (!response.ok) {
       throw new Error(`Auction fetch failed with HTTP ${response.status}.`);
     }
 
-    return new DOMParser().parseFromString(await response.text(), "text/html");
+    return new root.DOMParser().parseFromString(await response.text(), "text/html");
   }
 
   function loadDocumentViaFrame(url) {
+    if (!pageDocument) return Promise.reject(new Error("Auction iframe loading needs a page document."));
     return new Promise((resolve, reject) => {
       const iframe = makeHiddenFrame();
-      const timeout = window.setTimeout(() => {
+      const timeout = root.setTimeout(() => {
         cleanupFrame(iframe);
         reject(new Error("Auction iframe load timed out."));
       }, 20000);
 
       iframe.addEventListener("load", () => {
-        window.clearTimeout(timeout);
+        root.clearTimeout(timeout);
         try {
           resolve(copyFrameDocument(iframe));
         } catch (error) {
@@ -417,21 +477,22 @@
       }, { once: true });
 
       iframe.src = url;
-      document.documentElement.append(iframe);
+      pageDocument.documentElement.append(iframe);
     });
   }
 
   function loadDocumentViaForm(url, body, method) {
+    if (!pageDocument) return Promise.reject(new Error("Auction form loading needs a page document."));
     return new Promise((resolve, reject) => {
       const iframe = makeHiddenFrame();
-      const form = document.createElement("form");
-      const timeout = window.setTimeout(() => {
+      const form = pageDocument.createElement("form");
+      const timeout = root.setTimeout(() => {
         cleanupFrame(iframe, form);
         reject(new Error("Auction form load timed out."));
       }, 20000);
 
       iframe.addEventListener("load", () => {
-        window.clearTimeout(timeout);
+        root.clearTimeout(timeout);
         try {
           resolve(copyFrameDocument(iframe));
         } catch (error) {
@@ -447,20 +508,20 @@
       form.style.display = "none";
 
       for (const [name, value] of body.entries()) {
-        const input = document.createElement("input");
+        const input = pageDocument.createElement("input");
         input.type = "hidden";
         input.name = name;
         input.value = value;
         form.append(input);
       }
 
-      document.documentElement.append(iframe, form);
+      pageDocument.documentElement.append(iframe, form);
       form.submit();
     });
   }
 
   function makeHiddenFrame() {
-    const iframe = document.createElement("iframe");
+    const iframe = pageDocument.createElement("iframe");
     iframe.name = `glad-ah-scan-frame-${Date.now()}-${Math.random().toString(36).slice(2)}`;
     iframe.style.cssText = "display:none !important;width:0;height:0;border:0;";
     return iframe;
@@ -472,7 +533,7 @@
       throw new Error("Could not read the loaded auction document.");
     }
 
-    return new DOMParser().parseFromString(doc.documentElement.outerHTML, "text/html");
+    return new root.DOMParser().parseFromString(doc.documentElement.outerHTML, "text/html");
   }
 
   function cleanupFrame(iframe, form) {
@@ -502,7 +563,7 @@
     if (!icon) return null;
 
     const itemMeta = normalizeItemMeta(meta);
-    const lines = parseTooltipLines(icon, form.ownerDocument || icon.ownerDocument || document);
+    const lines = parseTooltipLines(icon, form.ownerDocument || icon.ownerDocument || pageDocument);
     const parsed = parseStats(lines);
 
     return {
@@ -535,6 +596,44 @@
       .filter(Boolean);
   }
 
+  function parseAuctionItemsFromHtml(html, meta = {}) {
+    return readAuctionFormHtmls(html)
+      .map((formHtml, index) => parseAuctionItemFromHtmlForm(formHtml, index, meta))
+      .filter(Boolean);
+  }
+
+  function parseAuctionItemFromHtmlForm(formHtml, index = 0, meta = {}) {
+    const iconTag = readFirstTagWithAttribute(formHtml, "data-tooltip");
+    if (!iconTag) return null;
+
+    const itemMeta = normalizeItemMeta(meta);
+    const lines = parseTooltipLinesFromValue(readHtmlAttribute(iconTag, "data-tooltip"));
+    const parsed = parseStats(lines);
+
+    return {
+      auctionId: readInputValueFromHtml(formHtml, "auctionid") || String(index),
+      categoryId: itemMeta.categoryId,
+      viewId: itemMeta.viewId,
+      category: itemMeta.category,
+      group: itemMeta.group,
+      itemType: itemMeta.itemType,
+      ttype: itemMeta.ttype,
+      name: lines[0] || "Unknown item",
+      priceGold: parseInteger(readHtmlAttribute(iconTag, "data-price-gold")),
+      bidAmount: parseInteger(readInputValueFromHtml(formHtml, "bid_amount")),
+      contentType: readHtmlAttribute(iconTag, "data-content-type"),
+      basis: readHtmlAttribute(iconTag, "data-basis"),
+      itemClass: readHtmlAttribute(iconTag, "class"),
+      imageSrc: readIconImageSrcFromHtml(formHtml),
+      imageStyle: readHtmlAttribute(iconTag, "style"),
+      lines,
+      parserVersion: CORE_VERSION,
+      level: parsed.level,
+      itemValue: parsed.itemValue,
+      stats: parsed.stats
+    };
+  }
+
   function readIconImageSrc(icon) {
     const image = icon.querySelector("img");
     if (image?.src) return image.src;
@@ -542,6 +641,85 @@
     const style = icon.getAttribute("style") || "";
     const backgroundImage = style.match(/background-image\s*:\s*url\((['"]?)(.*?)\1\)/i);
     return backgroundImage?.[2] || "";
+  }
+
+  function readIconImageSrcFromHtml(formHtml) {
+    const imageTag = String(formHtml || "").match(/<img\b[^>]*>/i)?.[0] || "";
+    return readHtmlAttribute(imageTag, "src");
+  }
+
+  function readAuctionFormHtmls(html) {
+    const forms = [];
+    const pattern = /<form\b[^>]*\bid\s*=\s*(["'])auctionForm[^"']*\1[^>]*>[\s\S]*?<\/form>/gi;
+    for (const match of String(html || "").matchAll(pattern)) {
+      forms.push(match[0]);
+    }
+    return forms;
+  }
+
+  function readFirstTagWithAttribute(html, attribute) {
+    const attrPattern = new RegExp(`\\b${escapeRegExp(attribute)}\\s*=`, "i");
+    for (const tag of readHtmlTags(html)) {
+      if (attrPattern.test(tag)) return tag;
+    }
+    return "";
+  }
+
+  function readHtmlTags(html) {
+    const source = String(html || "");
+    const tags = [];
+    let index = 0;
+
+    while (index < source.length) {
+      const start = source.indexOf("<", index);
+      if (start === -1) break;
+
+      let quote = "";
+      let end = start + 1;
+      while (end < source.length) {
+        const char = source[end];
+        if (quote) {
+          if (char === quote) quote = "";
+        } else if (char === "\"" || char === "'") {
+          quote = char;
+        } else if (char === ">") {
+          end += 1;
+          break;
+        }
+        end += 1;
+      }
+
+      tags.push(source.slice(start, end));
+      index = end;
+    }
+
+    return tags;
+  }
+
+  function readInputValueFromHtml(html, name) {
+    const inputPattern = /<input\b[^>]*>/gi;
+    for (const match of String(html || "").matchAll(inputPattern)) {
+      const tag = match[0];
+      if (readHtmlAttribute(tag, "name") === name) return readHtmlAttribute(tag, "value");
+    }
+    return "";
+  }
+
+  function readHtmlAttribute(value, attribute) {
+    const pattern = new RegExp(`${escapeRegExp(attribute)}\\s*=\\s*(?:"([^"]*)"|'([^']*)'|([^\\s>]+))`, "i");
+    const match = String(value || "").match(pattern);
+    return decodeHtml(match?.[1] ?? match?.[2] ?? match?.[3] ?? "");
+  }
+
+  function decodeHtml(value) {
+    return String(value || "")
+      .replace(/&quot;/g, "\"")
+      .replace(/&#0?39;/g, "'")
+      .replace(/&apos;/g, "'")
+      .replace(/&amp;/g, "&")
+      .replace(/&lt;/g, "<")
+      .replace(/&gt;/g, ">")
+      .replace(/&#(\d+);/g, (_match, code) => String.fromCharCode(Number(code) || 0));
   }
 
   function sortScannedItems(items) {
@@ -589,14 +767,21 @@
       pageBridgeResponseSource: PAGE_BRIDGE_RESPONSE_SOURCE
     },
     isAuctionPage,
+    createAuctionScanRequest,
+    formatFilterSummary,
+    makeAuctionUrl,
     parseInteger,
     parseSignedBonus,
     parseDamageRange,
     parseTooltipLines,
+    parseTooltipLinesFromValue,
     parseStats,
     normalizeItemMeta,
     parseAuctionItemFromForm,
     parseAuctionItemsFromDocument,
+    parseAuctionItemsFromHtml,
+    readSharedFilterValues,
+    sortScannedItems,
     scanAllAuctionItems
   };
 
@@ -608,17 +793,18 @@
 
   // Page-world bridge
   function shouldInstallPageBridge() {
+    if (!pageDocument || typeof root.addEventListener !== "function" || typeof root.postMessage !== "function") return false;
     const hasExtensionRuntime = typeof chrome !== "undefined" && Boolean(chrome.runtime?.id);
-    return document.currentScript?.dataset.gladAuctionPageBridge === "1" || !hasExtensionRuntime;
+    return pageDocument.currentScript?.dataset.gladAuctionPageBridge === "1" || !hasExtensionRuntime;
   }
 
   function installPageBridge(coreApi) {
-    if (window.__GladiatusAuctionCoreBridgeVersion === CORE_VERSION) return;
-    window.__GladiatusAuctionCoreBridgeInstalled = true;
-    window.__GladiatusAuctionCoreBridgeVersion = CORE_VERSION;
+    if (root.__GladiatusAuctionCoreBridgeVersion === CORE_VERSION) return;
+    root.__GladiatusAuctionCoreBridgeInstalled = true;
+    root.__GladiatusAuctionCoreBridgeVersion = CORE_VERSION;
 
-    window.addEventListener("message", async (event) => {
-      if (event.source !== window || event.data?.source !== PAGE_BRIDGE_REQUEST_SOURCE || !event.data?.id) return;
+    root.addEventListener("message", async (event) => {
+      if (event.source !== root || event.data?.source !== PAGE_BRIDGE_REQUEST_SOURCE || !event.data?.id) return;
 
       const { id, method, args = [] } = event.data;
       try {
@@ -627,12 +813,12 @@
         }
 
         const result = await coreApi[method](...args);
-        window.postMessage({ source: PAGE_BRIDGE_RESPONSE_SOURCE, id, ok: true, result }, "*");
+        root.postMessage({ source: PAGE_BRIDGE_RESPONSE_SOURCE, id, ok: true, result }, "*");
       } catch (error) {
-        window.postMessage({ source: PAGE_BRIDGE_RESPONSE_SOURCE, id, ok: false, error: error.message || String(error) }, "*");
+        root.postMessage({ source: PAGE_BRIDGE_RESPONSE_SOURCE, id, ok: false, error: error.message || String(error) }, "*");
       }
     });
 
-    window.postMessage({ source: PAGE_BRIDGE_RESPONSE_SOURCE, type: "ready", version: CORE_VERSION }, "*");
+    root.postMessage({ source: PAGE_BRIDGE_RESPONSE_SOURCE, type: "ready", version: CORE_VERSION }, "*");
   }
 })();

@@ -272,6 +272,29 @@
     });
   }
 
+  async function scanAuctionInBackground() {
+    const request = CORE.createAuctionScanRequest(document);
+    const response = await sendRuntimeMessage({
+      type: "GLAD_AUCTION_FORCE_SCAN",
+      request
+    });
+    if (!response?.ok) throw new Error(response?.error || "Could not scan auction categories.");
+    return response.result;
+  }
+
+  function sendRuntimeMessage(message) {
+    return new Promise((resolve, reject) => {
+      chrome.runtime.sendMessage(message, (response) => {
+        const runtimeError = chrome.runtime.lastError;
+        if (runtimeError) {
+          reject(new Error(runtimeError.message));
+          return;
+        }
+        resolve(response);
+      });
+    });
+  }
+
   function readSortState() {
     const defaults = {
       selectedSort: getContextDefaultSortId(),
@@ -875,7 +898,7 @@
 
       if (!isMessageType(message, MESSAGE_TYPES.scanAll)) return false;
 
-      callPageCore("scanAllAuctionItems")
+      scanAuctionInBackground()
         .then((result) => sendResponse({ ok: true, result }))
         .catch((error) => sendResponse({ ok: false, error: error.message || String(error) }));
 

@@ -1,6 +1,18 @@
-importScripts("score-model.js", "arena-core.js", "arena-background-scan.js");
+importScripts("auction-schema.js", "auction-core.js", "score-model.js", "arena-core.js", "arena-background-scan.js", "auction-background-scan.js");
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  if (message?.type === "GLAD_AUCTION_FORCE_SCAN") {
+    log("manual auction scan requested", { url: safeUrl(message.request?.sourceUrl) });
+    auctionScanner().forceScan(message.request)
+      .then((result) => sendResponse({ ok: true, result }))
+      .catch((error) => {
+        log("manual auction scan failed", { url: safeUrl(message.request?.sourceUrl), error: error.message || String(error) });
+        sendResponse({ ok: false, error: error.message || String(error) });
+      });
+
+    return true;
+  }
+
   if (message?.type === "GLAD_AH_REPAIR_AUCTION_CONTENT") {
     repairAuctionContent(_sender)
       .then(() => sendResponse({ ok: true }))
@@ -118,6 +130,13 @@ function arenaScanner() {
     throw new Error("Arena background scanner failed to load.");
   }
   return self.GladiatusArenaBackgroundScanner;
+}
+
+function auctionScanner() {
+  if (!self.GladiatusAuctionBackgroundScanner) {
+    throw new Error("Auction background scanner failed to load.");
+  }
+  return self.GladiatusAuctionBackgroundScanner;
 }
 
 function log(message, details = {}) {

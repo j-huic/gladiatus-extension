@@ -55,7 +55,8 @@
       presets: [
         defineScorePreset({ id: "avgDamage", label: "Average damage", score: (item) => stat(item, "damageAvg") }),
         defineScorePreset({ id: "maxDamage", label: "Max damage", score: (item) => stat(item, "damageMax") }),
-        defineScorePreset({ id: "damageValue", label: "Damage / gold", score: (item) => safeDivide(stat(item, "damageAvg"), price(item)) })
+        defineScorePreset({ id: "damageValue", label: "Damage / gold", score: (item) => safeDivide(stat(item, "damageAvg"), price(item)) }),
+        defineResaleValuePreset()
       ]
     }),
     defineItemView({
@@ -68,7 +69,8 @@
         defineScorePreset({ id: "tank", label: "Tank utility", score: tankScore }),
         defineScorePreset({ id: "healing", label: "Healing", score: (item) => stat(item, "healing") }),
         defineScorePreset({ id: "block", label: "Block", score: (item) => stat(item, "blockvalue") }),
-        defineScorePreset({ id: "threat", label: "Threat", score: (item) => stat(item, "threat") })
+        defineScorePreset({ id: "threat", label: "Threat", score: (item) => stat(item, "threat") }),
+        defineResaleValuePreset()
       ],
       filters: [
         defineMinimumStatFilter({
@@ -86,7 +88,8 @@
       presets: [
         defineScorePreset({ id: "efficiency", label: "Health / gold", score: (item) => safeDivide(stat(item, "foodHealing"), price(item)) }),
         defineScorePreset({ id: "healing", label: "Total healing", score: (item) => stat(item, "foodHealing") }),
-        defineScorePreset({ id: "cheap", label: "Cheapest", score: (item) => -price(item), display: (item) => `Price: ${formatNumber(price(item))}` })
+        defineScorePreset({ id: "cheap", label: "Cheapest", score: (item) => -price(item), display: (item) => `Price: ${formatNumber(price(item))}` }),
+        defineResaleValuePreset()
       ]
     }),
     defineItemView({
@@ -98,7 +101,8 @@
         defineScorePreset({ id: "damage", label: "Damage", score: (item) => stat(item, "damageBonus") }),
         defineScorePreset({ id: "agility", label: "Agility", score: (item) => stat(item, "agility") }),
         defineScorePreset({ id: "dexterity", label: "Dexterity", score: (item) => stat(item, "dexterity") }),
-        defineScorePreset({ id: "strength", label: "Strength", score: (item) => stat(item, "strength") })
+        defineScorePreset({ id: "strength", label: "Strength", score: (item) => stat(item, "strength") }),
+        defineResaleValuePreset()
       ]
     }),
     defineItemView({
@@ -108,7 +112,8 @@
       accepts: (item) => acceptsView("mercenaries", item),
       presets: [
         defineScorePreset({ id: "agility", label: "Agility", score: (item) => stat(item, "agility") }),
-        defineScorePreset({ id: "dexStrength", label: "Dexterity + strength", score: (item) => stat(item, "dexterity") + stat(item, "strength") })
+        defineScorePreset({ id: "dexStrength", label: "Dexterity + strength", score: (item) => stat(item, "dexterity") + stat(item, "strength") }),
+        defineResaleValuePreset()
       ]
     })
   ];
@@ -338,6 +343,19 @@
     return stat(item, "healing") + stat(item, "blockvalue") + stat(item, "hardeningvalue") + stat(item, "threat");
   }
 
+  function defineResaleValuePreset() {
+    return defineScorePreset({
+      id: "resaleValue",
+      label: "Value / bid",
+      score: resaleValueScore,
+      display: (_item, score) => `Value / bid: ${formatNumber(score)}`
+    });
+  }
+
+  function resaleValueScore(item) {
+    return safeDivide(Number(item?.itemValue) || 0, bidPrice(item));
+  }
+
   function acceptsView(viewId, item) {
     return getItemViewId(item) === viewId;
   }
@@ -360,6 +378,10 @@
 
   function price(item) {
     return Number(item?.priceGold || item?.bidAmount || 0) || 0;
+  }
+
+  function bidPrice(item) {
+    return Number(item?.bidAmount || 0) || 0;
   }
 
   function priceLabel(item) {
@@ -422,7 +444,9 @@
     normalizeCustomDefinitions,
     presetSortId,
     price,
+    bidPrice,
     priceLabel,
+    resaleValueScore,
     scoreCustomDefinition,
     summarizeCustomDefinition,
     stat

@@ -146,6 +146,61 @@ function makeBackgroundScannerContext(options = {}) {
   };
 }
 
+function makeAuctionBackgroundScannerContext(options = {}) {
+  const storage = options.storage || {};
+  const setCalls = options.setCalls || [];
+  const context = {
+    console: { ...console, log() {}, warn() {} },
+    URL,
+    URLSearchParams,
+    Date,
+    Math,
+    fetch: options.fetch || (async () => {
+      throw new Error("Unexpected fetch in auction background scanner test.");
+    }),
+    setTimeout(callback) {
+      callback();
+      return 1;
+    },
+    clearTimeout() {},
+    chrome: {
+      storage: {
+        local: {
+          async get(keys) {
+            if (Array.isArray(keys)) {
+              return Object.fromEntries(keys.map((key) => [key, storage[key]]));
+            }
+            if (typeof keys === "string") return { [keys]: storage[keys] };
+            if (keys && typeof keys === "object") {
+              return Object.fromEntries(Object.keys(keys).map((key) => [key, storage[key] ?? keys[key]]));
+            }
+            return { ...storage };
+          },
+          async set(values) {
+            setCalls.push(JSON.parse(JSON.stringify(values || {})));
+            Object.assign(storage, values || {});
+          }
+        }
+      }
+    }
+  };
+  context.self = context;
+  context.globalThis = context;
+  vm.createContext(context);
+
+  for (const file of ["auction-schema.js", "auction-core.js", "auction-background-scan.js"]) {
+    vm.runInContext(fs.readFileSync(path.join(rootDir, file), "utf8"), context, { filename: file });
+  }
+
+  return {
+    schema: context.GladiatusAuctionSchema,
+    core: context.GladiatusAuctionCore,
+    scanner: context.GladiatusAuctionBackgroundScanner,
+    storage,
+    setCalls
+  };
+}
+
 function makeAuctionContentContext(listeners) {
   const context = {
     console: { ...console, error() {}, warn() {} },
@@ -363,12 +418,16 @@ const { schema, score, model, core, arena } = loadGlobals();
   const isolatedEntries = manifest.content_scripts.filter((entry) => entry.world !== "MAIN");
 
   assert.equal(manifest.background.service_worker, "background.js");
-  assert.match(backgroundSource, /importScripts\("score-model\.js", "arena-core\.js", "arena-background-scan\.js"\);/);
+  assert.match(backgroundSource, /importScripts\("auction-schema\.js", "auction-core\.js", "score-model\.js", "arena-core\.js", "arena-background-scan\.js", "auction-background-scan\.js"\);/);
+  assert.ok(backgroundSource.indexOf("auction-schema.js") < backgroundSource.indexOf("auction-core.js"));
+  assert.ok(backgroundSource.indexOf("auction-core.js") < backgroundSource.indexOf("score-model.js"));
   assert.ok(backgroundSource.indexOf("score-model.js") < backgroundSource.indexOf("arena-core.js"));
   assert.ok(backgroundSource.indexOf("arena-core.js") < backgroundSource.indexOf("arena-background-scan.js"));
+  assert.ok(backgroundSource.indexOf("arena-background-scan.js") < backgroundSource.indexOf("auction-background-scan.js"));
   const repairFiles = backgroundSource.match(/const AUCTION_CONTENT_FILES = \[([\s\S]*?)\];/)?.[1] || "";
   assert.ok(repairFiles.indexOf("\"arena-scan.js\"") < repairFiles.indexOf("\"arena-content.js\""));
   assert.equal(repairFiles.includes("arena-background-scan.js"), false);
+  assert.equal(repairFiles.includes("auction-background-scan.js"), false);
   assert.deepEqual(mainEntry.js, ["auction-schema.js", "auction-core.js"]);
   assert.equal(isolatedEntries.length, 1);
   assert.deepEqual(isolatedEntries[0].js, [
@@ -392,6 +451,7 @@ const { schema, score, model, core, arena } = loadGlobals();
     ...manifest.content_scripts.flatMap((entry) => [...(entry.js || []), ...(entry.css || [])]),
     ...manifest.web_accessible_resources.flatMap((entry) => entry.resources || []),
     manifest.background.service_worker,
+    "auction-background-scan.js",
     "arena-background-scan.js",
     "popup.js",
     "popup/runtime.js",
@@ -562,6 +622,32 @@ const { schema, score, model, core, arena } = loadGlobals();
 }
 
 {
+  const tooltip = JSON.stringify([[
+    ["HTML Shield"],
+    ["Damage +4"],
+    ["Agility +7"],
+    ["Level 41"],
+    ["Value 1.500"]
+  ]]);
+  const html = `
+    <form id="auctionForm-html">
+      <input type="hidden" name="auctionid" value="auction-html">
+      <input type="hidden" name="bid_amount" value="300">
+      <div class="auction_item_div item-i-1" data-tooltip='${tooltip}' data-price-gold="9.999" data-content-type="item" data-basis="base" style="background-image:url(/cdn/html-item.png)"></div>
+    </form>
+  `;
+  const [item] = core.parseAuctionItemsFromHtml(html, { categoryId: "main:2" });
+
+  assert.equal(item.auctionId, "auction-html");
+  assert.equal(item.name, "HTML Shield");
+  assert.equal(item.bidAmount, 300);
+  assert.equal(item.priceGold, 9999);
+  assert.equal(item.itemValue, 1500);
+  assert.equal(item.stats.damageBonus, 4);
+  assert.equal(item.stats.agility, 7);
+}
+
+{
   const renamedLabelItem = {
     category: "Changed Human Label",
     viewId: "armor",
@@ -582,6 +668,16 @@ const { schema, score, model, core, arena } = loadGlobals();
   const [control] = model.getFilterControlDescriptors("armor", filters.armor);
   assert.equal(control.id, "minDamageBonus");
   assert.equal(control.value, "5");
+}
+
+{
+  const resalePreset = model.getPreset("armor", "resaleValue").preset;
+  const item = { viewId: "armor", itemValue: 1200, bidAmount: 300, priceGold: 99999, stats: {} };
+
+  assert.equal(model.bidPrice(item), 300);
+  assert.equal(model.resaleValueScore(item), 4);
+  assert.equal(resalePreset.score(item), 4);
+  assert.equal(resalePreset.display(item, resalePreset.score(item)), "Value / bid: 4");
 }
 
 {
@@ -863,6 +959,82 @@ function isProfileFetch(url) {
   return new URL(url).searchParams.get("mod") === "player";
 }
 
+function auctionHtmlFixture({ auctionId = "auction-1", name = "Auction Shield", bid = 250, price = 9000, value = 1250 } = {}) {
+  const tooltip = JSON.stringify([[
+    [name],
+    ["Damage +5"],
+    ["Agility +9"],
+    ["Level 42"],
+    [`Value ${value}`]
+  ]]);
+  return `
+    <html>
+      <body>
+        <form id="auctionForm-${auctionId}">
+          <input type="hidden" name="auctionid" value="${auctionId}">
+          <input type="hidden" name="bid_amount" value="${bid}">
+          <div class="auction_item_div item-i-1" data-tooltip='${tooltip}' data-price-gold="${price}"></div>
+        </form>
+      </body>
+    </html>
+  `;
+}
+
+async function runAuctionBackgroundScannerTests() {
+  const auctionUrl = "https://s47-en.gladiatus.gameforge.com/game/index.php?mod=auction&sh=test";
+  const calls = [];
+  const { schema, scanner, storage } = makeAuctionBackgroundScannerContext({
+    fetch: async (rawUrl, options) => {
+      calls.push({
+        url: String(rawUrl),
+        method: options.method,
+        body: options.body.toString()
+      });
+      return {
+        ok: true,
+        status: 200,
+        async text() {
+          return auctionHtmlFixture();
+        }
+      };
+    }
+  });
+
+  const result = await scanner.forceScan({
+    sourceUrl: auctionUrl,
+    sharedFilters: {
+      qry: "",
+      itemLevel: "39",
+      itemQuality: "-1",
+      csrfToken: "csrf-test"
+    },
+    formFields: [
+      ["qry", ""],
+      ["itemLevel", "1"],
+      ["itemQuality", "-1"],
+      ["csrf_token", "old-token"]
+    ],
+    sources: [{
+      label: "Gladiator necessities",
+      url: auctionUrl,
+      categories: [schema.getScanCategory("main:2")]
+    }]
+  });
+
+  assert.equal(result.items.length, 1);
+  assert.equal(result.items[0].categoryId, "main:2");
+  assert.equal(result.items[0].bidAmount, 250);
+  assert.equal(result.items[0].itemValue, 1250);
+  assert.equal(result.categoriesScanned, 1);
+  assert.equal(storage[schema.storageKeys.scanResult].items[0].auctionId, "auction-1");
+
+  const body = new URLSearchParams(calls[0].body);
+  assert.equal(calls[0].method, "POST");
+  assert.equal(body.get("itemType"), "2");
+  assert.equal(body.get("itemLevel"), "39");
+  assert.equal(body.get("csrf_token"), "csrf-test");
+}
+
 async function runBackgroundScannerTests() {
   const singleArenaUrl = "https://s47-en.gladiatus.gameforge.com/game/index.php?mod=arena&submod=serverArena&aType=2&sh=test";
   const teamArenaUrl = "https://s47-en.gladiatus.gameforge.com/game/index.php?mod=arena&submod=serverArena&aType=3&sh=test";
@@ -980,7 +1152,12 @@ async function runBackgroundScannerTests() {
   assert.equal(errorStorage[statusKey].single.message, "Error fetching list");
 }
 
-runBackgroundScannerTests()
+async function runAsyncTests() {
+  await runAuctionBackgroundScannerTests();
+  await runBackgroundScannerTests();
+}
+
+runAsyncTests()
   .then(() => {
     console.log("architecture tests passed");
   })
