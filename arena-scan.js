@@ -122,6 +122,27 @@
     });
   }
 
+  async function refreshSelfProfile(options = {}) {
+    const profileUrl = deriveCurrentSelfProfileUrl();
+    if (!profileUrl) throw new Error("Could not derive your Gladiatus profile URL from this page.");
+
+    const response = await sendRuntimeMessage({
+      type: "GLAD_ARENA_REFRESH_SELF_PROFILE",
+      profileUrl,
+      force: Boolean(options.force)
+    });
+    if (!response?.ok) throw new Error(response?.error || "Could not refresh self profile.");
+    return response.record || null;
+  }
+
+  function deriveCurrentSelfProfileUrl() {
+    return ARENA.deriveSelfProfileUrl(root.location?.href || "", {
+      playerId: root.playerId || "",
+      secureHash: root.secureHash || "",
+      scripts: Array.from(root.document?.scripts || []).map((script) => script.textContent || "")
+    });
+  }
+
   function rememberCurrentListUrl(url = root.location?.href || "") {
     if (!ARENA.isArenaPageUrl(url)) return Promise.resolve("");
     return Promise.resolve(ARENA.arenaKindFromUrl(url));
@@ -135,6 +156,11 @@
       runPassiveCheck().catch((error) => {
         console.warn("Passive arena scan trigger failed.", error);
       });
+      if (deriveCurrentSelfProfileUrl()) {
+        refreshSelfProfile().catch((error) => {
+          console.warn("Self profile refresh trigger failed.", error);
+        });
+      }
     }, PASSIVE_BOOT_DELAY_MS);
   }
 
@@ -381,10 +407,22 @@
     });
   }
 
+  if (chrome.runtime?.onMessage) {
+    chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+      if (message?.type !== "GLAD_ARENA_REFRESH_SELF_PROFILE") return false;
+
+      refreshSelfProfile({ force: Boolean(message.force) })
+        .then((record) => sendResponse({ ok: true, record }))
+        .catch((error) => sendResponse({ ok: false, error: error.message || String(error) }));
+      return true;
+    });
+  }
+
   root.GladiatusArenaScanner = {
     arenaFormulaFingerprint,
     bootPassive,
     checkIntervalMs: LIST_CHECK_INTERVAL_MS,
+    deriveSelfProfileUrl: deriveCurrentSelfProfileUrl,
     fullScanQuietMs: FULL_SCAN_QUIET_MS,
     getCachedResultForCurrentPage,
     getCachedResultForEntries,
@@ -393,6 +431,7 @@
     passiveScansStorageKey: ARENA.passiveScansStorageKey,
     scanStatusStorageKey: ARENA.scanStatusStorageKey,
     rememberCurrentListUrl,
+    refreshSelfProfile,
     runPassiveCheck,
     scanCurrentPage
   };

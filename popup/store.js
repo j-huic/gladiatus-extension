@@ -46,6 +46,7 @@ export const DEFAULT_POPUP_STATE = {
 export const state = {
   scanResult: null,
   arenaResult: null,
+  selfProfile: null,
   customDefinitions: [],
   arenaFormulas: [],
   editorDraft: null,

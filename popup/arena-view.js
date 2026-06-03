@@ -13,7 +13,7 @@ import {
   validateArenaFormula
 } from "./store.js";
 
-export function createArenaView({ render }) {
+export function createArenaView({ render, refreshSelfProfile }) {
   function renderArenaPage() {
     renderArenaPageTabs();
     nodes.tabs.hidden = true;
@@ -90,6 +90,18 @@ export function createArenaView({ render }) {
     select.value = getSelectedArenaFormula().id;
     label.append(text, select);
     fragment.append(label);
+
+    const selfStatus = document.createElement("span");
+    selfStatus.className = "arena-self-status";
+    selfStatus.textContent = formatSelfProfileStatus(state.selfProfile);
+    fragment.append(selfStatus);
+
+    const refresh = document.createElement("button");
+    refresh.type = "button";
+    refresh.dataset.action = "refresh-self-profile";
+    refresh.textContent = "Refresh self profile";
+    fragment.append(refresh);
+
     nodes.controls.replaceChildren(fragment);
   }
 
@@ -423,6 +435,19 @@ export function createArenaView({ render }) {
     return true;
   }
 
+  async function onControlsClick(event) {
+    const actionNode = event.target.closest("[data-action='refresh-self-profile']");
+    if (!actionNode) return false;
+
+    actionNode.disabled = true;
+    try {
+      await refreshSelfProfile({ force: true });
+    } finally {
+      actionNode.disabled = false;
+    }
+    return true;
+  }
+
   async function onResultsClick(event) {
     const actionNode = event.target.closest("[data-action]");
     if (!actionNode) return false;
@@ -561,8 +586,18 @@ export function createArenaView({ render }) {
     ].includes(action);
   }
 
+  function formatSelfProfileStatus(record) {
+    const character = record?.character;
+    if (!character) return "Self: not cached";
+
+    const readiness = character.combat?.ready ? "ready" : `missing ${(character.combat?.missing || []).join(", ") || "combat data"}`;
+    const refreshed = record.scannedAt ? `, ${new Date(record.scannedAt).toLocaleTimeString()}` : "";
+    return `Self: ${character.name || "Unknown"}${character.level ? ` L${character.level}` : ""}, ${readiness}${refreshed}`;
+  }
+
   return {
     renderArenaPage,
+    onControlsClick,
     onControlsInput,
     onResultsClick,
     onEditorInput

@@ -12,6 +12,8 @@
   const RESULTS_STORAGE_KEY = "glad-arena-last-scan-v1";
   const PASSIVE_SCANS_STORAGE_KEY = "glad-arena-passive-scans-v1";
   const SCAN_STATUS_STORAGE_KEY = "glad-arena-scan-status-v1";
+  const SELF_PROFILE_STORAGE_KEY = "glad-arena-self-profile-v1";
+  const SELF_PROFILE_MAX_AGE_MS = 6 * 60 * 60 * 1000;
   const TEAM_DOLL_MIN = 2;
   const TEAM_DOLL_MAX = 6;
 
@@ -214,6 +216,7 @@
         stats: { ...this.stats },
         profile: this.profile,
         equipment: this.equipment.map((item) => ({ ...item, stats: { ...(item.stats || {}) }, lines: [...(item.lines || [])] })),
+        combat: combatProfile(this),
         scores: characterScores(this)
       };
     }
@@ -239,6 +242,42 @@
     } catch {
       return "single";
     }
+  }
+
+  function deriveSelfProfileUrl(pageUrl, context = {}) {
+    try {
+      const parsed = new URL(String(pageUrl || ""));
+      if (parsed.protocol !== "https:" || !parsed.hostname.endsWith(".gladiatus.gameforge.com")) return "";
+      if (!parsed.pathname.startsWith("/game/")) return "";
+
+      const sourceText = [
+        context.documentText || "",
+        ...(Array.isArray(context.scripts) ? context.scripts : [])
+      ].join("\n");
+      const playerId = String(context.playerId || playerIdFromText(sourceText) || parsed.searchParams.get("p") || "").trim();
+      if (!/^\d+$/.test(playerId)) return "";
+
+      const secureHash = String(context.secureHash || parsed.searchParams.get("sh") || secureHashFromText(sourceText) || "").trim();
+      const profileUrl = new URL(parsed.pathname.endsWith("/index.php") ? parsed.pathname : "/game/index.php", parsed.origin);
+      profileUrl.searchParams.set("mod", "player");
+      profileUrl.searchParams.set("p", playerId);
+      profileUrl.searchParams.set("doll", "1");
+      if (secureHash) profileUrl.searchParams.set("sh", secureHash);
+      return profileUrl.href;
+    } catch {
+      return "";
+    }
+  }
+
+  function playerIdFromText(value) {
+    const text = String(value || "");
+    return text.match(/\bplayerId\s*=\s*["']?(\d+)/)?.[1]
+      || text.match(/\bchat\.init\((\d+)\)/)?.[1]
+      || "";
+  }
+
+  function secureHashFromText(value) {
+    return String(value || "").match(/\bsecureHash\s*=\s*["']([^"']+)/)?.[1] || "";
   }
 
   function parseInteger(value) {
@@ -599,6 +638,80 @@
       criticalHealingValue: source.healing.criticalHealingValue,
       criticalHealingChance: source.healing.criticalHealingChance
     };
+  }
+
+  function combatantFromCharacter(character) {
+    const lifeMax = combatStat(character, "lifeMax");
+    const lifeCurrent = combatStat(character, "lifeCurrent");
+    const hp = lifeMax > 0 ? lifeMax : lifeCurrent;
+    const critChance = clampPercent(combatStat(character, "critChance"), 0, 50);
+    const blockChance = clampPercent(combatStat(character, "blockChance"), 0, 50);
+    const critAvoidChance = clampPercent(combatStat(character, "critAvoidChance"), 0, 25);
+
+    return {
+      name: String(character?.name || "Unknown fighter").trim() || "Unknown fighter",
+      level: Number(character?.level || character?.stats?.level) || 0,
+      hp,
+      maxHp: hp,
+      damageMin: combatStat(character, "damageMin"),
+      damageMax: combatStat(character, "damageMax"),
+      armour: combatStat(character, "armour"),
+      armourAbsorbMin: combatStat(character, "armourAbsorbMin"),
+      armourAbsorbMax: combatStat(character, "armourAbsorbMax"),
+      strength: combatStat(character, "strength"),
+      dexterity: combatStat(character, "dexterity"),
+      agility: combatStat(character, "agility"),
+      constitution: combatStat(character, "constitution"),
+      charisma: combatStat(character, "charisma"),
+      intelligence: combatStat(character, "intelligence"),
+      critChance,
+      blockChance,
+      critAvoidChance
+    };
+  }
+
+  function combatantReadiness(character) {
+    const combatant = combatantFromCharacter(character);
+    const missing = [];
+    const warnings = [];
+
+    if (combatant.level <= 0) missing.push("level");
+    if (combatant.maxHp <= 0) missing.push("hp");
+    if (combatant.damageMin <= 0 || combatant.damageMax <= 0) missing.push("damageRange");
+    for (const key of PRIMARY_STAT_KEYS) {
+      if (combatant[key] <= 0) missing.push(key);
+    }
+
+    if (!combatStat(character, "lifeMax") && combatStat(character, "lifeCurrent")) {
+      warnings.push("lifeMax missing; using lifeCurrent");
+    }
+    for (const [key, max] of [["critChance", 50], ["blockChance", 50], ["critAvoidChance", 25]]) {
+      const raw = combatStat(character, key);
+      if (raw > max) warnings.push(`${key} clamped to ${max}`);
+      else if (raw < 0) warnings.push(`${key} clamped to 0`);
+    }
+
+    return {
+      ready: missing.length === 0,
+      missing,
+      warnings
+    };
+  }
+
+  function combatProfile(character) {
+    const readiness = combatantReadiness(character);
+    return {
+      ...readiness,
+      combatant: combatantFromCharacter(character)
+    };
+  }
+
+  function combatStat(character, key) {
+    return Number(character?.stats?.[key]) || 0;
+  }
+
+  function clampPercent(value, min, max) {
+    return Math.min(max, Math.max(min, Number(value) || 0));
   }
 
   function parseProfileEquipmentItems(items = []) {
@@ -1174,7 +1287,13 @@
     passiveScansStorageKey: PASSIVE_SCANS_STORAGE_KEY,
     resultsStorageKey: RESULTS_STORAGE_KEY,
     scanStatusStorageKey: SCAN_STATUS_STORAGE_KEY,
+    selfProfileStorageKey: SELF_PROFILE_STORAGE_KEY,
+    selfProfileMaxAgeMs: SELF_PROFILE_MAX_AGE_MS,
     arenaOpponentFingerprint,
+    combatantFromCharacter,
+    combatantReadiness,
+    combatProfile,
+    deriveSelfProfileUrl,
     formatArenaFormula: summarizeArenaFormula,
     formatCharacterStats,
     formatNumber,

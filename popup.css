@@ -146,6 +146,11 @@ button:disabled {
   min-width: 180px;
 }
 
+.arena-self-status {
+  color: #cbb58c;
+  font-weight: 700;
+}
+
 .results {
   max-height: 420px;
   overflow: auto;

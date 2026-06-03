@@ -422,6 +422,8 @@ const { schema, score, model, core, arena } = loadGlobals();
   const manifest = JSON.parse(fs.readFileSync(path.join(rootDir, "manifest.json"), "utf8"));
   const backgroundSource = fs.readFileSync(path.join(rootDir, "background.js"), "utf8");
   const arenaScanSource = fs.readFileSync(path.join(rootDir, "arena-scan.js"), "utf8");
+  const popupSource = fs.readFileSync(path.join(rootDir, "popup.js"), "utf8");
+  const popupRuntimeSource = fs.readFileSync(path.join(rootDir, "popup/runtime.js"), "utf8");
   const mainEntry = manifest.content_scripts.find((entry) => entry.world === "MAIN");
   const isolatedEntries = manifest.content_scripts.filter((entry) => entry.world !== "MAIN");
 
@@ -450,6 +452,10 @@ const { schema, score, model, core, arena } = loadGlobals();
   ]);
   assert.ok(isolatedEntries[0].js.indexOf("arena-scan.js") < isolatedEntries[0].js.indexOf("arena-content.js"));
   assert.match(arenaScanSource, /const STATUS_BOX_ID = "glad-arena-passive-status"/);
+  assert.match(arenaScanSource, /GLAD_ARENA_REFRESH_SELF_PROFILE/);
+  assert.match(backgroundSource, /GLAD_ARENA_REFRESH_SELF_PROFILE/);
+  assert.match(popupRuntimeSource, /function refreshArenaSelfProfile/);
+  assert.match(popupSource, /ARENA\.selfProfileStorageKey/);
   assert.match(arenaScanSource, /function shouldRenderStatusBox/);
   assert.match(arenaScanSource, /return isGladiatusGamePage\(url\);/);
   assert.match(arenaScanSource, /chrome\.storage\.onChanged\.addListener/);
@@ -610,6 +616,11 @@ const { schema, score, model, core, arena } = loadGlobals();
   assert.equal(character.stats.agility, 189);
   assert.equal(character.stats.damageAvg, 116.5);
   assert.equal(character.primaryStatSum, 682);
+  assert.deepEqual(JSON.parse(JSON.stringify(arena.combatantReadiness(character))), {
+    ready: false,
+    missing: ["hp"],
+    warnings: []
+  });
 }
 
 {
@@ -740,6 +751,67 @@ const { schema, score, model, core, arena } = loadGlobals();
   assert.equal(character.equipment[0].stats.damageMin, 80);
   assert.equal(character.equipment[0].stats.damageBonus, 9);
   assert.equal(character.equipment[0].stats.strength, 22);
+
+  const combat = JSON.parse(JSON.stringify(character.toJSON().combat));
+  assert.equal(combat.ready, true);
+  assert.deepEqual(combat.missing, []);
+  assert.deepEqual(combat.warnings, []);
+  assert.deepEqual(combat.combatant, {
+    name: "Ikarrus",
+    level: 48,
+    hp: 6222,
+    maxHp: 6222,
+    damageMin: 108,
+    damageMax: 125,
+    armour: 3148,
+    armourAbsorbMin: 43,
+    armourAbsorbMax: 52,
+    strength: 65,
+    dexterity: 138,
+    agility: 189,
+    constitution: 83,
+    charisma: 155,
+    intelligence: 52,
+    critChance: 9,
+    blockChance: 3,
+    critAvoidChance: 7
+  });
+}
+
+{
+  const character = new arena.ArenaCharacter({
+    name: "Clamp Tester",
+    level: 10,
+    stats: {
+      lifeCurrent: 900,
+      damageMin: 10,
+      damageMax: 20,
+      strength: 1,
+      dexterity: 2,
+      agility: 3,
+      constitution: 4,
+      charisma: 5,
+      intelligence: 6,
+      critChance: 75,
+      blockChance: 99,
+      critAvoidChance: 50
+    }
+  });
+  const combat = JSON.parse(JSON.stringify(arena.combatProfile(character)));
+
+  assert.equal(combat.ready, true);
+  assert.deepEqual(combat.missing, []);
+  assert.deepEqual(combat.warnings, [
+    "lifeMax missing; using lifeCurrent",
+    "critChance clamped to 50",
+    "blockChance clamped to 50",
+    "critAvoidChance clamped to 25"
+  ]);
+  assert.equal(combat.combatant.hp, 900);
+  assert.equal(combat.combatant.maxHp, 900);
+  assert.equal(combat.combatant.critChance, 50);
+  assert.equal(combat.combatant.blockChance, 50);
+  assert.equal(combat.combatant.critAvoidChance, 25);
 }
 
 {
@@ -1012,6 +1084,28 @@ const { schema, score, model, core, arena } = loadGlobals();
 {
   assert.equal(arena.passiveScansStorageKey, "glad-arena-passive-scans-v1");
   assert.equal(arena.scanStatusStorageKey, "glad-arena-scan-status-v1");
+  assert.equal(arena.selfProfileStorageKey, "glad-arena-self-profile-v1");
+  assert.equal(arena.selfProfileMaxAgeMs, 6 * 60 * 60 * 1000);
+}
+
+{
+  const overviewUrl = "https://s47-en.gladiatus.gameforge.com/game/index.php?mod=overview&sh=test";
+  assert.equal(
+    arena.deriveSelfProfileUrl(overviewUrl, {
+      scripts: ['var secureHash = "script-hash"; var playerId = "3946776";']
+    }),
+    "https://s47-en.gladiatus.gameforge.com/game/index.php?mod=player&p=3946776&doll=1&sh=test"
+  );
+  assert.equal(
+    arena.deriveSelfProfileUrl("https://s47-en.gladiatus.gameforge.com/game/index.php?mod=player&p=3946776&sh=test"),
+    "https://s47-en.gladiatus.gameforge.com/game/index.php?mod=player&p=3946776&doll=1&sh=test"
+  );
+  assert.equal(
+    arena.deriveSelfProfileUrl("https://s47-en.gladiatus.gameforge.com/game/index.php?mod=player&p=111&sh=test", {
+      scripts: ["var playerId = 3946776;"]
+    }),
+    "https://s47-en.gladiatus.gameforge.com/game/index.php?mod=player&p=3946776&doll=1&sh=test"
+  );
 }
 
 function arenaListFixture({ aType = "2", players = [] } = {}) {
@@ -1183,6 +1277,7 @@ async function runBackgroundScannerTests() {
     111: profileFixture("Alpha"),
     222: profileFixture("Bravo", { tabs: teamTabsFixture("222") }),
     333: profileFixture("Gamma", { dexterity: 130 }),
+    999: profileFixture("Self", { level: 83 }),
     default: profileFixture("Fallback")
   };
   const calls = [];
@@ -1201,6 +1296,33 @@ async function runBackgroundScannerTests() {
   assert.equal(parsedCharacter.name, "Alpha");
   assert.equal(parsedCharacter.stats.dexterity, 70);
   assert.equal(parsedCharacter.stats.damageAvg, 40);
+  assert.deepEqual(JSON.parse(JSON.stringify(parsedCharacter.combat?.missing)), ["hp"]);
+
+  const selfProfileUrl = "https://s47-en.gladiatus.gameforge.com/game/index.php?mod=player&p=999&doll=1&sh=test";
+  const selfProfileKey = backgroundArena.selfProfileStorageKey;
+  storage[selfProfileKey] = {
+    scannedAt: new Date().toISOString(),
+    profileUrl: selfProfileUrl,
+    playerId: "999",
+    cacheKey: "s47-en.gladiatus.gameforge.com:999:1",
+    character: { name: "Cached Self", combat: { ready: true } }
+  };
+  const callsBeforeCachedSelf = calls.length;
+  const cachedSelf = await scanner.refreshSelfProfile({ profileUrl: selfProfileUrl });
+  assert.equal(cachedSelf.character.name, "Cached Self");
+  assert.equal(calls.length, callsBeforeCachedSelf);
+
+  storage[selfProfileKey].scannedAt = new Date(Date.now() - backgroundArena.selfProfileMaxAgeMs - 1000).toISOString();
+  const callsBeforeStaleSelf = calls.length;
+  const staleSelf = await scanner.refreshSelfProfile({ profileUrl: selfProfileUrl });
+  assert.ok(calls.length > callsBeforeStaleSelf);
+  assert.equal(staleSelf.character.name, "Self");
+  assert.ok(staleSelf.character.combat);
+  assert.equal(storage[selfProfileKey].playerId, "999");
+
+  const callsBeforeForcedSelf = calls.length;
+  await scanner.refreshSelfProfile({ profileUrl: selfProfileUrl, force: true });
+  assert.ok(calls.length > callsBeforeForcedSelf);
 
   const tabs = scanner.readProfileDollTabsFromHtml(profileHtmls[222], "https://s47-en.gladiatus.gameforge.com/game/index.php?mod=player&p=222&sh=test");
   assert.equal(tabs.length, 5);

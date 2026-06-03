@@ -9,6 +9,7 @@ import {
   getActiveTab,
   loadStorage,
   nodes,
+  refreshArenaSelfProfile,
   saveStorage,
   scanArenaOpponents,
   sendAuctionScanMessage,
@@ -33,7 +34,7 @@ import {
 } from "./popup/store.js";
 
 const auctionView = createAuctionView({ render, applyCurrentSortToPage });
-const arenaView = createArenaView({ render });
+const arenaView = createArenaView({ render, refreshSelfProfile });
 
 nodes.scanButton.addEventListener("click", onScanButtonClick);
 nodes.pageTabs.addEventListener("click", onPageTabClick);
@@ -56,6 +57,7 @@ async function init() {
     await saveStorage(SCAN_STORAGE_KEY, state.scanResult);
   }
   state.arenaResult = await loadStorage(ARENA.resultsStorageKey);
+  state.selfProfile = await loadStorage(ARENA.selfProfileStorageKey);
   state.filterValuesByView = MODEL.normalizeAllFilterValues(await loadStorage(FILTER_VALUES_STORAGE_KEY) || state.popupState.filterByView);
   await saveStorage(FILTER_VALUES_STORAGE_KEY, state.filterValuesByView);
   state.customDefinitions = MODEL.normalizeCustomDefinitions(await loadStorage(MODEL.customDefinitionsStorageKey));
@@ -220,6 +222,7 @@ async function onItemTabClick(event) {
 }
 
 async function onPresetClick(event) {
+  if (state.pageMode === "arena" && await arenaView.onControlsClick(event)) return;
   await auctionView.onPresetClick(event);
 }
 
@@ -254,5 +257,25 @@ async function applyCurrentSortToPage() {
     });
   } catch {
     // The popup can still browse cached scan results when the active tab is not an auction page.
+  }
+}
+
+async function refreshSelfProfile(options = {}) {
+  setStatus("Refreshing self profile...");
+
+  try {
+    state.activeTab = await getActiveTab();
+    if (!state.activeTab?.id) throw new Error("No active tab found.");
+    if (detectPageMode(state.activeTab.url) !== "arena") throw new Error("Open a Gladiatus arena page before refreshing your profile.");
+
+    const response = await refreshArenaSelfProfile(state.activeTab, { force: options.force !== false });
+    if (!response?.ok) throw new Error(response?.error || "Could not refresh self profile.");
+
+    state.selfProfile = response.record || await loadStorage(ARENA.selfProfileStorageKey);
+    await saveStorage(ARENA.selfProfileStorageKey, state.selfProfile);
+    render();
+    setStatus("Self profile refreshed.");
+  } catch (error) {
+    setStatus(error.message || String(error));
   }
 }

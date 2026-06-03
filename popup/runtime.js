@@ -80,6 +80,24 @@ export async function scanArenaOpponents(tab, formula) {
   });
 }
 
+export async function refreshArenaSelfProfile(tab, options = {}) {
+  const message = {
+    type: "GLAD_ARENA_REFRESH_SELF_PROFILE",
+    force: Boolean(options.force)
+  };
+
+  try {
+    const response = await sendTabMessage(tab.id, message);
+    if (response) return response;
+  } catch {
+    await ensureAuctionContentScript(tab.id);
+    return sendTabMessage(tab.id, message);
+  }
+
+  await ensureAuctionContentScript(tab.id);
+  return sendTabMessage(tab.id, message);
+}
+
 export function sendTabMessage(tabId, message) {
   return new Promise((resolve, reject) => {
     chrome.tabs.sendMessage(tabId, message, (response) => {

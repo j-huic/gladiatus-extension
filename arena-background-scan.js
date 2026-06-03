@@ -958,6 +958,57 @@
     return JSON.stringify(ARENA.normalizeArenaFormula(rawFormula) || ARENA.defaultArenaFormula());
   }
 
+  async function refreshSelfProfile(options = {}) {
+    const profileUrl = normalizeProfileUrl(options.profileUrl);
+    const cached = await readSelfProfileCache();
+    const playerId = profileUrl.searchParams.get("p") || "";
+    const cacheKey = selfProfileCacheKey(profileUrl);
+
+    if (!options.force && isFreshSelfProfile(cached, cacheKey)) {
+      log("self profile cache fresh", { playerId });
+      return cached;
+    }
+
+    const html = await fetchProfileHtml(profileUrl.href);
+    const character = parseCharacterFromHtml(html, {
+      id: playerId,
+      profileUrl: profileUrl.href,
+      doll: ARENA.parseInteger(profileUrl.searchParams.get("doll")) || 1,
+      province: provinceFromHost(profileUrl.hostname),
+      language: profileUrl.searchParams.get("language") || ""
+    });
+    const record = {
+      scannedAt: new Date().toISOString(),
+      profileUrl: profileUrl.href,
+      playerId,
+      cacheKey,
+      character
+    };
+    await chrome.storage.local.set({ [ARENA.selfProfileStorageKey]: record });
+    log("self profile refreshed", { playerId, ready: Boolean(character?.combat?.ready) });
+    return record;
+  }
+
+  async function readSelfProfileCache() {
+    const result = await chrome.storage.local.get(ARENA.selfProfileStorageKey);
+    const record = result[ARENA.selfProfileStorageKey];
+    return record && typeof record === "object" ? record : null;
+  }
+
+  function isFreshSelfProfile(record, cacheKey) {
+    if (!record || record.cacheKey !== cacheKey || !record.character) return false;
+    const timestamp = Date.parse(record.scannedAt || "");
+    return Number.isFinite(timestamp) && Date.now() - timestamp < ARENA.selfProfileMaxAgeMs;
+  }
+
+  function selfProfileCacheKey(profileUrl) {
+    return [
+      profileUrl.hostname,
+      profileUrl.searchParams.get("p") || "",
+      profileUrl.searchParams.get("doll") || "1"
+    ].join(":");
+  }
+
   async function fetchProfileHtml(url) {
     return fetchGladiatusHtml(normalizeProfileUrl(url), "Profile");
   }
@@ -1115,6 +1166,7 @@
     passiveCheck,
     readArenaOpponentEntriesFromHtml,
     readProfileDollTabsFromHtml,
+    refreshSelfProfile,
     scanEntries
   };
 })();

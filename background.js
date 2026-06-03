@@ -84,6 +84,24 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     return true;
   }
 
+  if (message?.type === "GLAD_ARENA_REFRESH_SELF_PROFILE") {
+    log("self profile refresh requested", { url: safeUrl(message.profileUrl), force: Boolean(message.force) });
+    arenaScanner().refreshSelfProfile({
+      profileUrl: message.profileUrl,
+      force: Boolean(message.force)
+    })
+      .then((record) => {
+        log("self profile refresh completed", { url: safeUrl(record?.profileUrl), ready: Boolean(record?.character?.combat?.ready) });
+        sendResponse({ ok: true, record });
+      })
+      .catch((error) => {
+        log("self profile refresh failed", { url: safeUrl(message.profileUrl), error: error.message || String(error) });
+        sendResponse({ ok: false, error: error.message || String(error) });
+      });
+
+    return true;
+  }
+
   if (message?.type === "GLAD_ARENA_FETCH_LIST") {
     log("arena list fetch requested", { url: safeUrl(message.url) });
     arenaScanner().fetchArenaListHtml(message.url)
