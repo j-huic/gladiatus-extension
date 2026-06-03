@@ -346,6 +346,14 @@ function decodeHtml(value) {
     .replace(/&gt;/g, ">");
 }
 
+function makeStatTooltip(rows) {
+  return JSON.stringify([rows.map(([label, value]) => [[label, value], ["#DDDDDD", "#DDDDDD"]])]);
+}
+
+function makeItemTooltip(lines) {
+  return JSON.stringify([lines.map((line) => Array.isArray(line) ? [line, ["#DDD", "#DDD"]] : [line, "#DDD"])]);
+}
+
 function makeElement(tagName) {
   return {
     tagName: String(tagName || "").toUpperCase(),
@@ -602,6 +610,136 @@ const { schema, score, model, core, arena } = loadGlobals();
   assert.equal(character.stats.agility, 189);
   assert.equal(character.stats.damageAvg, 116.5);
   assert.equal(character.primaryStatSum, 682);
+}
+
+{
+  const tooltips = {
+    life: makeStatTooltip([
+      ["Life points:", "6111 / 6222"],
+      ["Life on level 48:", "1200"],
+      ["Through items:", "+222"],
+      ["Through reinforcement:", "0"],
+      ["Bonus through Constitution:", "+4800"],
+      ["Regeneration:", "240 per hour"]
+    ]),
+    strength: makeStatTooltip([
+      ["Strength:", 65],
+      ["Basic:", 40],
+      ["Maximum:", 112],
+      ["Through items:", "+25 from +31"]
+    ]),
+    dexterity: makeStatTooltip([["Dexterity:", 138], ["Basic:", 80], ["Maximum:", 168], ["Through items:", "+58 from +70"]]),
+    agility: makeStatTooltip([["Agility:", 189], ["Basic:", 90], ["Maximum:", 183], ["Through items:", "+99 from +101"]]),
+    constitution: makeStatTooltip([["Constitution:", 83], ["Basic:", 50], ["Maximum:", 122], ["Through items:", "+33 from +33"]]),
+    charisma: makeStatTooltip([["Charisma:", 155], ["Basic:", 90], ["Maximum:", 172], ["Through items:", "+65 from +77"]]),
+    intelligence: makeStatTooltip([["Intelligence:", 52], ["Basic:", 52], ["Maximum:", 126], ["Through items:", "0 from 0"]]),
+    armour: makeStatTooltip([
+      ["Armour:", 3148],
+      ["Absorbs damage:", "43 - 52"],
+      ["Resilience:", 18],
+      ["Through items:", 0],
+      ["Through agility:", "+18"],
+      ["Chance of avoiding critical hits:", "7 %"],
+      ["Blocking value:", 9],
+      ["Through items:", 2],
+      ["Through strength:", "+7"],
+      ["Chance to block a hit:", "3 %"]
+    ]),
+    damage: makeStatTooltip([
+      ["Damage:", "108 - 125"],
+      ["Basic:", "80 - 92"],
+      ["Through items:", "+21"],
+      ["Through strength:", "+6"],
+      ["Through reinforcement:", 0],
+      ["Critical damage:", 15],
+      ["Through items:", 1],
+      ["Through dexterity:", "+14"],
+      ["Chance for critical damage:", "9 %"]
+    ]),
+    healing: makeStatTooltip([
+      ["Healing:", 40],
+      ["Through items:", 3],
+      ["Through intelligence:", "+37"],
+      ["Critical healing value:", 10],
+      ["Chance for improved healing:", "2 %"]
+    ])
+  };
+  const values = new Map([
+    ["#char_level", "48"],
+    ["#char_f0", "65"],
+    ["#char_f1", "138"],
+    ["#char_f2", "189"],
+    ["#char_f3", "83"],
+    ["#char_f4", "155"],
+    ["#char_f5", "52"],
+    ["#char_panzer", "3148"],
+    ["#char_schaden", "108 - 125"],
+    ["#char_healing", "40"],
+    [".playername", "Ikarrus"]
+  ]);
+  const equipment = [{
+    className: "item-i-1-8 ui-droppable",
+    dataset: {
+      basis: "1-8",
+      contentType: "2",
+      containerNumber: "3",
+      level: "80",
+      tooltip: makeItemTooltip([
+        "Test sword",
+        "Damage 80 - 92",
+        "Armour +200",
+        "Strength +24% (+22)",
+        ["Damage +8", "+1"],
+        "Level 80"
+      ])
+    },
+    getAttribute(attribute) {
+      const attrs = {
+        "data-tooltip": this.dataset.tooltip,
+        "data-basis": this.dataset.basis,
+        "data-content-type": this.dataset.contentType,
+        "data-container-number": this.dataset.containerNumber,
+        "data-level": this.dataset.level
+      };
+      return attrs[attribute] || "";
+    }
+  }];
+  const doc = {
+    querySelector(selector) {
+      if (values.has(selector)) return { textContent: values.get(selector) };
+      const tooltipKey = Object.entries(arena.profileTooltipIds).find(([, id]) => selector === `#${id}`)?.[0];
+      if (tooltipKey) {
+        return {
+          textContent: "",
+          getAttribute(attribute) {
+            return attribute === "data-tooltip" ? tooltips[tooltipKey] : "";
+          }
+        };
+      }
+      return null;
+    },
+    querySelectorAll(selector) {
+      return selector === "#char [data-tooltip][data-basis]" ? equipment : [];
+    }
+  };
+  const character = arena.parseCharacterFromDocument(doc, { id: "1185379", province: "60" });
+
+  assert.equal(character.profile.life.max, 6222);
+  assert.equal(character.profile.life.regenPerHour, 240);
+  assert.equal(character.profile.primary.strength.basic, 40);
+  assert.equal(character.profile.primary.strength.fromItemsRaw, 31);
+  assert.equal(character.profile.armour.absorbMin, 43);
+  assert.equal(character.profile.armour.blockChance, 3);
+  assert.equal(character.profile.damage.basicMax, 92);
+  assert.equal(character.profile.damage.critChance, 9);
+  assert.equal(character.stats.lifeMax, 6222);
+  assert.equal(character.stats.armourAbsorbMax, 52);
+  assert.equal(character.stats.critChance, 9);
+  assert.equal(character.equipment.length, 1);
+  assert.equal(character.equipment[0].slot, "weapon");
+  assert.equal(character.equipment[0].stats.damageMin, 80);
+  assert.equal(character.equipment[0].stats.damageBonus, 9);
+  assert.equal(character.equipment[0].stats.strength, 22);
 }
 
 {

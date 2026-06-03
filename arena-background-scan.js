@@ -643,6 +643,20 @@
     const damage = ARENA.parseDamageRange(textById(html, "char_schaden"));
     const name = textByClass(html, "playername").trim() || meta.name || activeDoll.name;
     const level = stat("char_level") || meta.level;
+    const visibleStats = {
+      level,
+      strength: stat("char_f0"),
+      dexterity: stat("char_f1"),
+      agility: stat("char_f2"),
+      constitution: stat("char_f3"),
+      charisma: stat("char_f4"),
+      intelligence: stat("char_f5"),
+      armour: stat("char_panzer"),
+      healing: stat("char_healing"),
+      ...damage
+    };
+    const profile = ARENA.parseProfileDetailsFromTooltips(readProfileTooltipsFromHtml(html), visibleStats);
+    const equipment = readProfileEquipmentFromHtml(html);
 
     return new ARENA.ArenaCharacter({
       ...meta,
@@ -652,18 +666,41 @@
       role: meta.role || activeDoll.role,
       roleLabel: meta.roleLabel || activeDoll.roleLabel,
       stats: {
-        level,
-        strength: stat("char_f0"),
-        dexterity: stat("char_f1"),
-        agility: stat("char_f2"),
-        constitution: stat("char_f3"),
-        charisma: stat("char_f4"),
-        intelligence: stat("char_f5"),
-        armour: stat("char_panzer"),
-        healing: stat("char_healing"),
-        ...damage
-      }
+        ...visibleStats,
+        ...ARENA.profileStats(profile)
+      },
+      profile,
+      equipment
     }).toJSON();
+  }
+
+  function readProfileTooltipsFromHtml(html) {
+    const ids = ARENA.profileTooltipIds || {};
+    return Object.fromEntries(Object.entries(ids).map(([key, id]) => [
+      key,
+      readHtmlAttribute(firstTagById(html, id), "data-tooltip")
+    ]));
+  }
+
+  function readProfileEquipmentFromHtml(html) {
+    const items = [];
+    for (const tag of String(html || "").matchAll(/<[^>]+\bdata-tooltip\s*=\s*(["'])[\s\S]*?\1[^>]*>/gi)) {
+      const source = tag[0];
+      const basis = readHtmlAttribute(source, "data-basis");
+      const contentType = readHtmlAttribute(source, "data-content-type");
+      if (!basis && !contentType) continue;
+
+      items.push({
+        tooltip: readHtmlAttribute(source, "data-tooltip"),
+        className: readHtmlAttribute(source, "class"),
+        basis,
+        contentType,
+        containerNumber: readHtmlAttribute(source, "data-container-number"),
+        level: readHtmlAttribute(source, "data-level"),
+        quality: readHtmlAttribute(source, "data-quality")
+      });
+    }
+    return ARENA.parseProfileEquipmentItems(items);
   }
 
   function readActiveDollMeta(html, baseUrl = "") {
@@ -970,6 +1007,11 @@
       throw new Error("Only Gladiatus arena pages can be fetched.");
     }
     return url;
+  }
+
+  function firstTagById(html, id) {
+    const pattern = new RegExp(`<[^>]*\\bid\\s*=\\s*(["'])${escapeRegExp(id)}\\1[^>]*>`, "i");
+    return String(html || "").match(pattern)?.[0] || "";
   }
 
   function textById(html, id) {
