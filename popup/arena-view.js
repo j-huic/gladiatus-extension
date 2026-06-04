@@ -59,7 +59,7 @@ export function createArenaView({ render, refreshSelfProfile }) {
     setStatus(`Scanned ${state.arenaResult.opponentCount} opponents${scannedAt ? ` at ${scannedAt}` : ""}.${failed}`);
     nodes.summary.hidden = !state.arenaResult.bestName;
     nodes.summary.textContent = state.arenaResult.bestName
-      ? `Lowest ${state.arenaResult.arenaKind === "team" ? "team" : "fighter"} score: ${state.arenaResult.bestName} (${ARENA.formatNumber(state.arenaResult.bestScore)})`
+      ? arenaSummaryText(state.arenaResult)
       : "";
     nodes.results.replaceChildren(renderArenaResults(state.arenaResult));
   }
@@ -118,7 +118,7 @@ export function createArenaView({ render, refreshSelfProfile }) {
     const list = document.createElement("section");
     list.className = "arena-results";
 
-    const opponents = [...(result.opponents || [])].sort((a, b) => arenaScore(a) - arenaScore(b));
+    const opponents = [...(result.opponents || [])].sort(result.arenaKind === "team" ? compareArenaScores : compareSimulationResults);
     for (const opponent of opponents) {
       list.append(renderArenaOpponent(opponent));
     }
@@ -139,9 +139,13 @@ export function createArenaView({ render, refreshSelfProfile }) {
 
     const scoreNode = document.createElement("div");
     scoreNode.className = "score";
-    scoreNode.textContent = Number.isFinite(arenaScore(result))
-      ? `${result.team ? "Team score" : "Power score"}: ${ARENA.formatNumber(arenaScore(result))}`
-      : "Profile scan failed";
+    scoreNode.textContent = result.team
+      ? Number.isFinite(arenaScore(result))
+        ? `Team score: ${ARENA.formatNumber(arenaScore(result))}`
+        : "Profile scan failed"
+      : result.simulation?.ready
+      ? simulationWinLabel(result)
+      : result.error ? "Profile scan failed" : "Simulation unavailable";
 
     const meta = document.createElement("div");
     meta.className = "meta";
@@ -156,8 +160,34 @@ export function createArenaView({ render, refreshSelfProfile }) {
     return node;
   }
 
+  function arenaSummaryText(result) {
+    if (result.arenaKind === "team") {
+      return `Lowest team score: ${result.bestName} (${ARENA.formatNumber(result.bestScore)})`;
+    }
+    return `Best win chance: ${result.bestName} (${formatPercent(result.bestWinRate)})`;
+  }
+
   function arenaScore(result) {
-    return Number.isFinite(result.score) ? result.score : Number.POSITIVE_INFINITY;
+    return Number.isFinite(result?.score) ? result.score : Number.POSITIVE_INFINITY;
+  }
+
+  function compareArenaScores(a, b) {
+    const scoreDiff = arenaScore(a) - arenaScore(b);
+    if (scoreDiff) return scoreDiff;
+    return (a?.opponent?.rowIndex || a?.rowIndex || 0) - (b?.opponent?.rowIndex || b?.rowIndex || 0);
+  }
+
+  function compareSimulationResults(a, b) {
+    const aReady = Boolean(a?.simulation?.ready);
+    const bReady = Boolean(b?.simulation?.ready);
+    if (aReady !== bReady) return aReady ? -1 : 1;
+    if (aReady && bReady) {
+      const winDiff = (b.simulation.winRate || 0) - (a.simulation.winRate || 0);
+      if (winDiff) return winDiff;
+      const lossDiff = (a.simulation.lossRate || 0) - (b.simulation.lossRate || 0);
+      if (lossDiff) return lossDiff;
+    }
+    return (a?.opponent?.rowIndex || a?.rowIndex || 0) - (b?.opponent?.rowIndex || b?.rowIndex || 0);
   }
 
   function renderArenaMeta(result) {
@@ -175,6 +205,7 @@ export function createArenaView({ render, refreshSelfProfile }) {
       result.character.level ? `Level ${result.character.level}` : "",
       result.character.province ? `Province ${result.character.province}` : "",
       `Damage ${ARENA.formatNumber(result.character.stats.damageAvg || 0)}`,
+      simulationMeta(result),
       result.matches === false ? "Constraints not met" : ""
     ].filter(Boolean).join(" | ");
   }
@@ -593,6 +624,21 @@ export function createArenaView({ render, refreshSelfProfile }) {
     const readiness = character.combat?.ready ? "ready" : `missing ${(character.combat?.missing || []).join(", ") || "combat data"}`;
     const refreshed = record.scannedAt ? `, ${new Date(record.scannedAt).toLocaleTimeString()}` : "";
     return `Self: ${character.name || "Unknown"}${character.level ? ` L${character.level}` : ""}, ${readiness}${refreshed}`;
+  }
+
+  function simulationWinLabel(result) {
+    return result?.simulation?.ready ? `Win ${formatPercent(result.simulation.winRate)}` : "";
+  }
+
+  function simulationMeta(result) {
+    const simulation = result?.simulation;
+    if (!simulation) return "";
+    if (!simulation.ready) return simulation.missing?.length ? `Simulation unavailable: ${simulation.missing.join(", ")}` : "";
+    return `Loss ${formatPercent(simulation.lossRate)}, draw ${formatPercent(simulation.drawRate)} (${simulation.iterations} sims)`;
+  }
+
+  function formatPercent(value) {
+    return `${Math.round((Number(value) || 0) * 100)}%`;
   }
 
   return {

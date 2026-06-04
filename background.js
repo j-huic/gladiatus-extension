@@ -1,4 +1,4 @@
-importScripts("auction-schema.js", "auction-core.js", "score-model.js", "arena-core.js", "arena-background-scan.js", "auction-background-scan.js");
+importScripts("auction-schema.js", "auction-core.js", "score-model.js", "arena-core.js", "arena-sim.js", "arena-background-scan.js", "auction-background-scan.js");
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message?.type === "GLAD_AUCTION_FORCE_SCAN") {
@@ -26,7 +26,8 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     arenaScanner().passiveCheck({
       url: message.url,
       preferredKind: message.preferredKind,
-      force: Boolean(message.force)
+      force: Boolean(message.force),
+      onlyPreferred: Boolean(message.onlyPreferred)
     })
       .then((results) => sendResponse({ ok: true, results }))
       .catch((error) => {
@@ -126,7 +127,10 @@ const AUCTION_CONTENT_FILES = [
   "auction-model.js",
   "auction-core.js",
   "arena-core.js",
+  "arena-sim.js",
   "arena-scan.js",
+  "arena-passive-content.js",
+  "arena-status-content.js",
   "auction-content.js",
   "arena-content.js"
 ];

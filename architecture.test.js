@@ -80,7 +80,7 @@ function loadGlobals() {
   context.globalThis = context;
   vm.createContext(context);
 
-  for (const file of ["auction-schema.js", "score-model.js", "auction-model.js", "auction-core.js", "arena-core.js"]) {
+  for (const file of ["auction-schema.js", "score-model.js", "auction-model.js", "auction-core.js", "arena-core.js", "arena-sim.js"]) {
     vm.runInContext(fs.readFileSync(path.join(rootDir, file), "utf8"), context, { filename: file });
   }
 
@@ -89,7 +89,8 @@ function loadGlobals() {
     score: context.GladiatusScoreModel,
     model: context.GladiatusAuctionModel,
     core: context.GladiatusAuctionCore,
-    arena: context.GladiatusArenaCore
+    arena: context.GladiatusArenaCore,
+    sim: context.GladiatusArenaSim
   };
 }
 
@@ -134,12 +135,13 @@ function makeBackgroundScannerContext(options = {}) {
   context.globalThis = context;
   vm.createContext(context);
 
-  for (const file of ["score-model.js", "arena-core.js", "arena-background-scan.js"]) {
+  for (const file of ["score-model.js", "arena-core.js", "arena-sim.js", "arena-background-scan.js"]) {
     vm.runInContext(fs.readFileSync(path.join(rootDir, file), "utf8"), context, { filename: file });
   }
 
   return {
     arena: context.GladiatusArenaCore,
+    sim: context.GladiatusArenaSim,
     scanner: context.GladiatusArenaBackgroundScanner,
     storage,
     setCalls
@@ -354,6 +356,15 @@ function makeItemTooltip(lines) {
   return JSON.stringify([lines.map((line) => Array.isArray(line) ? [line, ["#DDD", "#DDD"]] : [line, "#DDD"])]);
 }
 
+function sequenceRandom(values) {
+  let index = 0;
+  return () => {
+    const value = values[index] ?? values[values.length - 1] ?? 0;
+    index += 1;
+    return value;
+  };
+}
+
 function makeElement(tagName) {
   return {
     tagName: String(tagName || "").toUpperCase(),
@@ -410,7 +421,7 @@ function makeElement(tagName) {
   };
 }
 
-const { schema, score, model, core, arena } = loadGlobals();
+const { schema, score, model, core, arena, sim } = loadGlobals();
 
 {
   assert.equal(core.version, "auction-core-v3");
@@ -419,23 +430,103 @@ const { schema, score, model, core, arena } = loadGlobals();
 }
 
 {
+  const base = {
+    name: "A",
+    level: 1,
+    hp: 100,
+    maxHp: 100,
+    damageMin: 10,
+    damageMax: 10,
+    armour: 0,
+    armourAbsorbMin: 0,
+    armourAbsorbMax: 0,
+    strength: 1,
+    dexterity: 100,
+    agility: 0,
+    constitution: 1,
+    charisma: 0,
+    intelligence: 1,
+    critChance: 0,
+    blockChance: 0,
+    critAvoidChance: 0
+  };
+  const miss = sim.simulateBattle(
+    { ...base, dexterity: 0, damageMin: 0, damageMax: 0 },
+    { ...base, name: "D", agility: 100, dexterity: 0, damageMin: 0, damageMax: 0 },
+    { maxRounds: 1, firstAttacker: "attacker", random: sequenceRandom([0.5, 0.5]) }
+  );
+  assert.equal(miss.rounds[0].strikes[0].result, "miss");
+
+  const blockedCrit = sim.simulateBattle(
+    { ...base, damageMin: 20, damageMax: 20, critChance: 50 },
+    { ...base, name: "D", blockChance: 50, armourAbsorbMin: 5, armourAbsorbMax: 5, damageMin: 0, damageMax: 0 },
+    { maxRounds: 1, firstAttacker: "attacker", random: sequenceRandom([0, 0, 0, 0, 0, 0.99, 0.99]) }
+  );
+  assert.equal(blockedCrit.rounds[0].strikes[0].isCrit, true);
+  assert.equal(blockedCrit.rounds[0].strikes[0].isBlocked, true);
+  assert.equal(blockedCrit.rounds[0].strikes[0].finalDamage, 15);
+  assert.equal(blockedCrit.rounds[0].strikes[0].defenderHpAfter, 85);
+
+  const doubleHit = sim.simulateBattle(
+    { ...base, damageMin: 5, damageMax: 5, charisma: 100 },
+    { ...base, name: "D", agility: 1, intelligence: 1, damageMin: 0, damageMax: 0 },
+    { maxRounds: 1, firstAttacker: "attacker", random: sequenceRandom([0, 0, 0.99, 0.99, 0, 0, 0, 0.99, 0.99, 0, 0.99]) }
+  );
+  assert.equal(doubleHit.rounds[0].strikes.filter((strike) => strike.attacker === "A").length, 2);
+  assert.equal(doubleHit.rounds[0].strikes[1].isSecondHalfOfDoubleHit, true);
+
+  const knockout = sim.simulateBattle(
+    { ...base, damageMin: 200, damageMax: 200 },
+    { ...base, name: "D" },
+    { maxRounds: 1, firstAttacker: "attacker", random: sequenceRandom([0, 0, 0.99, 0.99, 0]) }
+  );
+  assert.equal(knockout.outcome, "attacker_wins");
+  assert.equal(knockout.outcomeReason, "defender_killed");
+
+  const exhausted = sim.simulateBattle(
+    { ...base, damageMin: 10, damageMax: 10 },
+    { ...base, name: "D", damageMin: 5, damageMax: 5 },
+    { maxRounds: 1, firstAttacker: "attacker", random: sequenceRandom([0, 0, 0.99, 0.99, 0, 0.99, 0, 0, 0.99, 0.99, 0, 0.99]) }
+  );
+  assert.equal(exhausted.outcome, "attacker_wins");
+  assert.equal(exhausted.outcomeReason, "rounds_exhausted");
+
+  const odds = sim.simulateOddsPvP(
+    { ...base, damageMin: 200, damageMax: 200 },
+    { ...base, name: "D" },
+    { iterations: 3, maxRounds: 1, firstAttacker: "attacker", random: sequenceRandom([0.99]) }
+  );
+  assert.equal(odds.iterations, 3);
+  assert.equal(odds.wins, 3);
+  assert.equal(odds.losses, 0);
+  assert.equal(odds.draws, 0);
+  assert.equal(odds.winRate, 1);
+}
+
+{
   const manifest = JSON.parse(fs.readFileSync(path.join(rootDir, "manifest.json"), "utf8"));
   const backgroundSource = fs.readFileSync(path.join(rootDir, "background.js"), "utf8");
   const arenaScanSource = fs.readFileSync(path.join(rootDir, "arena-scan.js"), "utf8");
+  const arenaPassiveContentSource = fs.readFileSync(path.join(rootDir, "arena-passive-content.js"), "utf8");
+  const arenaStatusContentSource = fs.readFileSync(path.join(rootDir, "arena-status-content.js"), "utf8");
   const popupSource = fs.readFileSync(path.join(rootDir, "popup.js"), "utf8");
   const popupRuntimeSource = fs.readFileSync(path.join(rootDir, "popup/runtime.js"), "utf8");
   const mainEntry = manifest.content_scripts.find((entry) => entry.world === "MAIN");
   const isolatedEntries = manifest.content_scripts.filter((entry) => entry.world !== "MAIN");
 
   assert.equal(manifest.background.service_worker, "background.js");
-  assert.match(backgroundSource, /importScripts\("auction-schema\.js", "auction-core\.js", "score-model\.js", "arena-core\.js", "arena-background-scan\.js", "auction-background-scan\.js"\);/);
+  assert.match(backgroundSource, /importScripts\("auction-schema\.js", "auction-core\.js", "score-model\.js", "arena-core\.js", "arena-sim\.js", "arena-background-scan\.js", "auction-background-scan\.js"\);/);
   assert.ok(backgroundSource.indexOf("auction-schema.js") < backgroundSource.indexOf("auction-core.js"));
   assert.ok(backgroundSource.indexOf("auction-core.js") < backgroundSource.indexOf("score-model.js"));
   assert.ok(backgroundSource.indexOf("score-model.js") < backgroundSource.indexOf("arena-core.js"));
-  assert.ok(backgroundSource.indexOf("arena-core.js") < backgroundSource.indexOf("arena-background-scan.js"));
+  assert.ok(backgroundSource.indexOf("arena-core.js") < backgroundSource.indexOf("arena-sim.js"));
+  assert.ok(backgroundSource.indexOf("arena-sim.js") < backgroundSource.indexOf("arena-background-scan.js"));
   assert.ok(backgroundSource.indexOf("arena-background-scan.js") < backgroundSource.indexOf("auction-background-scan.js"));
   const repairFiles = backgroundSource.match(/const AUCTION_CONTENT_FILES = \[([\s\S]*?)\];/)?.[1] || "";
-  assert.ok(repairFiles.indexOf("\"arena-scan.js\"") < repairFiles.indexOf("\"arena-content.js\""));
+  assert.ok(repairFiles.indexOf("\"arena-sim.js\"") < repairFiles.indexOf("\"arena-scan.js\""));
+  assert.ok(repairFiles.indexOf("\"arena-scan.js\"") < repairFiles.indexOf("\"arena-passive-content.js\""));
+  assert.ok(repairFiles.indexOf("\"arena-passive-content.js\"") < repairFiles.indexOf("\"arena-status-content.js\""));
+  assert.ok(repairFiles.indexOf("\"arena-status-content.js\"") < repairFiles.indexOf("\"arena-content.js\""));
   assert.equal(repairFiles.includes("arena-background-scan.js"), false);
   assert.equal(repairFiles.includes("auction-background-scan.js"), false);
   assert.deepEqual(mainEntry.js, ["auction-schema.js", "auction-core.js"]);
@@ -446,19 +537,48 @@ const { schema, score, model, core, arena } = loadGlobals();
     "auction-model.js",
     "auction-core.js",
     "arena-core.js",
+    "arena-sim.js",
     "arena-scan.js",
+    "arena-passive-content.js",
+    "arena-status-content.js",
     "auction-content.js",
     "arena-content.js"
   ]);
-  assert.ok(isolatedEntries[0].js.indexOf("arena-scan.js") < isolatedEntries[0].js.indexOf("arena-content.js"));
-  assert.match(arenaScanSource, /const STATUS_BOX_ID = "glad-arena-passive-status"/);
+  assert.ok(isolatedEntries[0].js.indexOf("arena-sim.js") < isolatedEntries[0].js.indexOf("arena-scan.js"));
+  assert.ok(isolatedEntries[0].js.indexOf("arena-scan.js") < isolatedEntries[0].js.indexOf("arena-passive-content.js"));
+  assert.ok(isolatedEntries[0].js.indexOf("arena-passive-content.js") < isolatedEntries[0].js.indexOf("arena-status-content.js"));
+  assert.ok(isolatedEntries[0].js.indexOf("arena-status-content.js") < isolatedEntries[0].js.indexOf("arena-content.js"));
   assert.match(arenaScanSource, /GLAD_ARENA_REFRESH_SELF_PROFILE/);
   assert.match(backgroundSource, /GLAD_ARENA_REFRESH_SELF_PROFILE/);
   assert.match(popupRuntimeSource, /function refreshArenaSelfProfile/);
+  assert.match(popupRuntimeSource, /ARENA_SIM/);
   assert.match(popupSource, /ARENA\.selfProfileStorageKey/);
-  assert.match(arenaScanSource, /function shouldRenderStatusBox/);
-  assert.match(arenaScanSource, /return isGladiatusGamePage\(url\);/);
-  assert.match(arenaScanSource, /chrome\.storage\.onChanged\.addListener/);
+  assert.doesNotMatch(arenaScanSource, /glad-arena-passive-status/);
+  assert.doesNotMatch(arenaScanSource, /startFight|startGroupFight|startProvinciarumFight/);
+  assert.doesNotMatch(arenaScanSource, /MutationObserver/);
+  assert.doesNotMatch(arenaScanSource, /setInterval\(/);
+  assert.doesNotMatch(arenaScanSource, /GLAD_ARENA_PASSIVE_CHECK/);
+  assert.match(arenaPassiveContentSource, /GLAD_ARENA_PASSIVE_CHECK/);
+  assert.match(arenaPassiveContentSource, /const FIGHT_CLICK_SCAN_DELAY_MS = 5 \* 1000/);
+  assert.match(arenaPassiveContentSource, /function handleFightTriggerClick/);
+  assert.doesNotMatch(arenaPassiveContentSource, /glad-arena-passive-status|glad-arena-score/);
+  assert.doesNotMatch(arenaPassiveContentSource, /setInterval\(/);
+  assert.match(arenaStatusContentSource, /const STATUS_BOX_ID = "glad-arena-passive-status"/);
+  assert.match(arenaStatusContentSource, /chrome\.storage\.onChanged\.addListener/);
+  assert.match(arenaStatusContentSource, /\.\.\.STATUS_KINDS\.map/);
+  assert.doesNotMatch(arenaStatusContentSource, /GLAD_ARENA_PASSIVE_CHECK|GLAD_ARENA_FORCE_SCAN|GLAD_ARENA_ENSURE_VISIBLE_SCAN/);
+  const arenaContentSource = fs.readFileSync(path.join(rootDir, "arena-content.js"), "utf8");
+  assert.match(arenaContentSource, /__GladiatusArenaContentBootstrapped/);
+  assert.match(arenaContentSource, /GLAD_ARENA_BOOT_V2/);
+  assert.match(arenaContentSource, /function scheduleArenaBootForLocation/);
+  assert.match(arenaContentSource, /function refreshVisibleScanInBackground/);
+  assert.match(arenaContentSource, /function scheduleVisibleScanRetry/);
+  assert.match(arenaContentSource, /function opponentIdentityKeys/);
+  assert.doesNotMatch(arenaContentSource, /glad-arena-passive-status|GLAD_ARENA_PASSIVE_CHECK|startFight|startGroupFight|startProvinciarumFight/);
+  assert.match(popupRuntimeSource, /ensureAuctionContentScript\(tab\.id\);\s+return sendTabMessage\(tab\.id, message\);/);
+  assert.ok(popupRuntimeSource.indexOf("\"arena-scan.js\"") < popupRuntimeSource.indexOf("\"arena-passive-content.js\""));
+  assert.ok(popupRuntimeSource.indexOf("\"arena-passive-content.js\"") < popupRuntimeSource.indexOf("\"arena-status-content.js\""));
+  assert.ok(popupRuntimeSource.indexOf("\"arena-status-content.js\"") < popupRuntimeSource.indexOf("\"arena-content.js\""));
   assert.equal(fs.existsSync(path.join(rootDir, "content.js")), false);
 
   const referencedFiles = [
@@ -467,6 +587,9 @@ const { schema, score, model, core, arena } = loadGlobals();
     manifest.background.service_worker,
     "auction-background-scan.js",
     "arena-background-scan.js",
+    "arena-sim.js",
+    "arena-passive-content.js",
+    "arena-status-content.js",
     "popup.js",
     "popup/runtime.js",
     "popup/store.js",
@@ -479,6 +602,7 @@ const { schema, score, model, core, arena } = loadGlobals();
 
   const popupHtml = fs.readFileSync(path.join(rootDir, "popup.html"), "utf8");
   assert.match(popupHtml, /<script\s+src="auction-core\.js"><\/script>/);
+  assert.match(popupHtml, /<script\s+src="arena-sim\.js"><\/script>/);
   assert.match(popupHtml, /<script\s+type="module"\s+src="popup\.js"><\/script>/);
 }
 
@@ -1146,6 +1270,39 @@ function profileFixture(name, options = {}) {
   `;
 }
 
+function readyProfileFixture(name, options = {}) {
+  const level = options.level || 50;
+  const strength = options.strength || 60;
+  const dexterity = options.dexterity || 70;
+  const agility = options.agility || 80;
+  const constitution = options.constitution || 90;
+  const charisma = options.charisma || 100;
+  const intelligence = options.intelligence || 110;
+  const armour = options.armour || 1200;
+  const damage = options.damage || "30 - 50";
+  const healing = options.healing || 400;
+  const life = options.life || 2000;
+  return `
+    <html>
+      <body>
+        <span class="playername">${name}</span>
+        <span id="char_level">${level}</span>
+        <span id="char_f0">${strength}</span>
+        <span id="char_f1">${dexterity}</span>
+        <span id="char_f2">${agility}</span>
+        <span id="char_f3">${constitution}</span>
+        <span id="char_f4">${charisma}</span>
+        <span id="char_f5">${intelligence}</span>
+        <span id="char_panzer">${armour}</span>
+        <span id="char_schaden">${damage}</span>
+        <span id="char_healing">${healing}</span>
+        <span id="char_leben_tt" data-tooltip='${makeStatTooltip([["Life points:", `${life} / ${life}`]])}'></span>
+        ${options.tabs || ""}
+      </body>
+    </html>
+  `;
+}
+
 function teamTabsFixture(playerId) {
   const roles = [
     ["tank", "Dungeon Battle Quest: Direct attention to oneself"],
@@ -1277,7 +1434,7 @@ async function runBackgroundScannerTests() {
     111: profileFixture("Alpha"),
     222: profileFixture("Bravo", { tabs: teamTabsFixture("222") }),
     333: profileFixture("Gamma", { dexterity: 130 }),
-    999: profileFixture("Self", { level: 83 }),
+    999: readyProfileFixture("Self", { level: 83 }),
     default: profileFixture("Fallback")
   };
   const calls = [];
@@ -1342,6 +1499,13 @@ async function runBackgroundScannerTests() {
   assert.equal(storage[cacheKey].single.result.opponents[0].opponent.id, "111");
   assert.equal(storage[cacheKey].team.result.opponents[0].opponent.id, "222");
   assert.equal(storage[cacheKey].single.result.opponents[0].character.doll, 1);
+  assert.equal(storage[cacheKey].single.result.opponents[0].simulation.ready, false);
+  assert.deepEqual(JSON.parse(JSON.stringify(storage[cacheKey].single.result.opponents[0].simulation.missing)), ["opponent hp"]);
+  assert.equal(storage[cacheKey].team.result.bestName, "Bravo");
+  assert.equal(storage[cacheKey].team.result.bestScore, storage[cacheKey].team.result.opponents[0].score);
+  assert.equal(storage[cacheKey].team.result.bestWinRate, 0);
+  assert.equal(storage[cacheKey].team.result.opponents[0].simulation.ready, false);
+  assert.deepEqual(JSON.parse(JSON.stringify(storage[cacheKey].team.result.opponents[0].simulation.missing)), ["team simulation not supported"]);
   assert.equal(storage[statusKey].single.state, "ready");
   assert.equal(storage[statusKey].team.state, "ready");
   assert.equal(storage[statusKey].single.profileTotal, 1);
@@ -1362,7 +1526,7 @@ async function runBackgroundScannerTests() {
 
   const quiet = await scanner.passiveCheck({ url: singleArenaUrl, preferredKind: "single" });
   assert.equal(quiet.find((result) => result.kind === "single").skipped, "quiet");
-  assert.equal(storage[statusKey].single.message, "Ready, quiet phase");
+  assert.equal(storage[statusKey].single.message, "Ready");
 
   const old = new Date(Date.now() - 11 * 60 * 1000).toISOString();
   storage[cacheKey].single.scannedAt = old;
@@ -1372,17 +1536,111 @@ async function runBackgroundScannerTests() {
   const unchanged = await scanner.passiveCheck({ url: singleArenaUrl, preferredKind: "single" });
   assert.equal(unchanged.find((result) => result.kind === "single").skipped, "unchanged");
   assert.equal(calls.filter(isProfileFetch).length, profileCallsBeforeUnchanged);
-  assert.equal(storage[statusKey].single.message, "Ready, opponent list unchanged");
+  assert.equal(storage[statusKey].single.message, "Ready");
 
   const fresh = await scanner.passiveCheck({ url: singleArenaUrl, preferredKind: "single" });
   assert.equal(fresh.find((result) => result.kind === "single").skipped, "fresh");
-  assert.equal(storage[statusKey].single.message, "Ready, checked recently");
+  assert.equal(storage[statusKey].single.message, "Ready");
+
+  {
+    const reportUrl = "https://s47-en.gladiatus.gameforge.com/game/index.php?mod=reports&submod=showCombatReport&t=2&reportId=31712867&sh=test";
+    const reportCalls = [];
+    const reportContext = makeBackgroundScannerContext({
+      fetch: backgroundFetchFixture({
+        singleList,
+        teamList,
+        profileHtmls,
+        calls: reportCalls
+      })
+    });
+    const reportResult = await reportContext.scanner.passiveCheck({
+      url: reportUrl,
+      preferredKind: "single",
+      force: true,
+      onlyPreferred: true
+    });
+    assert.equal(reportResult.map((result) => result.kind).join(","), "single");
+    assert.equal(reportContext.storage[reportContext.arena.resultsStorageKey].arenaKind, "single");
+    assert.equal(reportContext.storage[reportContext.arena.passiveScansStorageKey].single.result.opponents[0].opponent.id, "111");
+    assert.equal(reportCalls.filter((url) => new URL(url).searchParams.get("aType") === "3").length, 0);
+  }
+
+  {
+    let quietList = singleList;
+    const quietCalls = [];
+    const quietStorage = {};
+    const quietContext = makeBackgroundScannerContext({
+      storage: quietStorage,
+      fetch: async (rawUrl) => backgroundFetchFixture({
+        singleList: quietList,
+        teamList: "",
+        profileHtmls,
+        calls: quietCalls
+      })(rawUrl)
+    });
+    const quietEntries = quietContext.scanner.readArenaOpponentEntriesFromHtml(singleList, singleArenaUrl);
+    await quietContext.scanner.forceScan({ url: singleArenaUrl, entries: quietEntries });
+    const quietCacheKey = quietContext.arena.passiveScansStorageKey;
+    const quietStatusKey = quietContext.arena.scanStatusStorageKey;
+    quietStorage[quietCacheKey].single.checkedAt = new Date(Date.now() - quietContext.scanner.listCheckIntervalMs - 1000).toISOString();
+    quietList = changedSingleList;
+
+    const quietProfileCallsBefore = quietCalls.filter(isProfileFetch).length;
+    const quietChanged = await quietContext.scanner.passiveCheck({ url: singleArenaUrl, preferredKind: "single" });
+    assert.equal(quietChanged.find((result) => result.kind === "single").scanned, true);
+    assert.ok(quietCalls.filter(isProfileFetch).length > quietProfileCallsBefore);
+    assert.equal(quietStorage[quietCacheKey].single.result.opponents[0].opponent.id, "333");
+    assert.equal(quietStorage[quietStatusKey].single.state, "ready");
+  }
 
   const changedEntries = scanner.readArenaOpponentEntriesFromHtml(changedSingleList, singleArenaUrl);
   const profileCallsBeforeVisible = calls.filter(isProfileFetch).length;
   await scanner.ensureVisibleScan({ url: singleArenaUrl, entries: changedEntries });
   assert.ok(calls.filter(isProfileFetch).length > profileCallsBeforeVisible);
   assert.equal(storage[cacheKey].single.result.opponents[0].opponent.id, "333");
+
+  const readyList = arenaListFixture({ aType: "2", players: [{ id: "444", name: "Delta" }] });
+  const readyProfileHtmls = {
+    444: readyProfileFixture("Delta", { life: 1700, damage: "20 - 30" }),
+    999: readyProfileFixture("Self", { life: 2200, damage: "40 - 60" }),
+    default: profileFixture("Fallback")
+  };
+  const readyCalls = [];
+  const readyContext = makeBackgroundScannerContext({
+    fetch: backgroundFetchFixture({
+      singleList: readyList,
+      teamList: "",
+      profileHtmls: readyProfileHtmls,
+      calls: readyCalls
+    })
+  });
+  const readySelfUrl = "https://s47-en.gladiatus.gameforge.com/game/index.php?mod=player&p=999&doll=1&sh=test";
+  readyContext.storage[readyContext.arena.selfProfileStorageKey] = {
+    scannedAt: new Date().toISOString(),
+    profileUrl: readySelfUrl,
+    playerId: "999",
+    cacheKey: "s47-en.gladiatus.gameforge.com:999:1",
+    character: readyContext.scanner.parseCharacterFromHtml(readyProfileHtmls[999], {
+      id: "999",
+      profileUrl: readySelfUrl,
+      doll: 1
+    })
+  };
+  const readyEntries = readyContext.scanner.readArenaOpponentEntriesFromHtml(readyList, singleArenaUrl);
+  const readyResult = await readyContext.scanner.forceScan({ url: singleArenaUrl, entries: readyEntries });
+  const readySimulation = readyResult.opponents[0].simulation;
+  assert.equal(readySimulation.ready, true);
+  assert.equal(readySimulation.iterations, 500);
+  assert.equal(readySimulation.wins + readySimulation.losses + readySimulation.draws, 500);
+  assert.equal(readyResult.bestName, "Delta");
+  assert.equal(readyResult.bestWinRate, readySimulation.winRate);
+  assert.equal(Object.hasOwn(readySimulation, "rounds"), false);
+  assert.equal(Object.hasOwn(readySimulation, "logs"), false);
+
+  readyContext.storage[readyContext.arena.selfProfileStorageKey].scannedAt = new Date(Date.now() - readyContext.arena.selfProfileMaxAgeMs - 1000).toISOString();
+  const staleSimulationResult = await readyContext.scanner.forceScan({ url: singleArenaUrl, entries: readyEntries });
+  assert.equal(staleSimulationResult.opponents[0].simulation.ready, false);
+  assert.deepEqual(JSON.parse(JSON.stringify(staleSimulationResult.opponents[0].simulation.missing)), ["self profile stale"]);
 
   const errorStorage = {
     [cacheKey]: {

@@ -3,9 +3,10 @@ export const SCORE = window.GladiatusScoreModel;
 export const MODEL = window.GladiatusAuctionModel;
 export const CORE = window.GladiatusAuctionCore;
 export const ARENA = window.GladiatusArenaCore;
+export const ARENA_SIM = window.GladiatusArenaSim;
 
-if (!SCHEMA || !SCORE || !MODEL || !CORE || !ARENA) {
-  throw new Error("Gladiatus auction schema, score model, auction model, auction core, and arena core must load before the popup.");
+if (!SCHEMA || !SCORE || !MODEL || !CORE || !ARENA || !ARENA_SIM) {
+  throw new Error("Gladiatus auction schema, score model, auction model, auction core, arena core, and arena sim must load before the popup.");
 }
 
 export const AUCTION_CONTENT_MESSAGES = {
@@ -74,10 +75,21 @@ export async function ensureAuctionPageUi(tab) {
 }
 
 export async function scanArenaOpponents(tab, formula) {
-  return sendTabMessage(tab.id, {
+  const message = {
     type: "GLAD_ARENA_SCAN_OPPONENTS",
     formula
-  });
+  };
+
+  try {
+    const response = await sendTabMessage(tab.id, message);
+    if (response) return response;
+  } catch {
+    await ensureAuctionContentScript(tab.id);
+    return sendTabMessage(tab.id, message);
+  }
+
+  await ensureAuctionContentScript(tab.id);
+  return sendTabMessage(tab.id, message);
 }
 
 export async function refreshArenaSelfProfile(tab, options = {}) {
@@ -119,7 +131,7 @@ export async function ensureAuctionContentScript(tabId) {
 
   await chrome.scripting.executeScript({
     target: { tabId },
-    files: ["auction-schema.js", "score-model.js", "auction-model.js", "auction-core.js", "arena-core.js", "arena-scan.js", "auction-content.js", "arena-content.js"]
+    files: ["auction-schema.js", "score-model.js", "auction-model.js", "auction-core.js", "arena-core.js", "arena-sim.js", "arena-scan.js", "arena-passive-content.js", "arena-status-content.js", "auction-content.js", "arena-content.js"]
   });
 }
 

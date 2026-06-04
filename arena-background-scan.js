@@ -1,12 +1,13 @@
 (() => {
   const root = typeof globalThis !== "undefined" ? globalThis : self;
   const ARENA = root.GladiatusArenaCore;
+  const SIM = root.GladiatusArenaSim;
 
   if (!ARENA || root.GladiatusArenaBackgroundScanner) return;
 
   const POPUP_STATE_KEY = "glad-ah-popup-state-v1";
   const FULL_SCAN_QUIET_MS = 10 * 60 * 1000;
-  const LIST_CHECK_INTERVAL_MS = 3 * 60 * 1000;
+  const LIST_CHECK_INTERVAL_MS = 60 * 1000;
   const LOCK_TIMEOUT_MS = 5 * 60 * 1000;
   const MANUAL_SCAN_DELAY_MS = 150;
   const PASSIVE_SCAN_DELAY_MS = 900;
@@ -73,16 +74,18 @@
     }
   }
 
-  async function passiveCheck({ url = "", preferredKind = "", force = false } = {}) {
+  async function passiveCheck({ url = "", preferredKind = "", force = false, onlyPreferred = false } = {}) {
     if (!isGladiatusGamePage(url)) return [];
 
     log("passive check starting", { url: safeUrl(url) });
     await rememberListUrl(url);
     const formula = await loadSelectedFormula();
     const results = [];
+    const preferred = KINDS.includes(preferredKind) ? preferredKind : "";
+    const kinds = onlyPreferred && preferred ? [preferred] : orderedKinds(url, preferred);
 
-    for (const kind of orderedKinds(url, preferredKind)) {
-      results.push(await checkPassiveKind(kind, formula, { url, force }));
+    for (const kind of kinds) {
+      results.push(await checkPassiveKind(kind, formula, { url, force, preferredKind: preferred }));
     }
 
     log("passive check finished", { results });
@@ -150,28 +153,21 @@
     const now = Date.now();
     const scannedAt = Date.parse(record.scannedAt || record.result?.scannedAt || "");
     const checkedAt = Date.parse(record.checkedAt || "");
-    if (!options.force && record.result && Number.isFinite(scannedAt) && now - scannedAt < FULL_SCAN_QUIET_MS) {
-      log("skip scan; full scan is still inside quiet period", { kind, scannedAt: record.scannedAt || record.result?.scannedAt });
-      await updateScanStatus(kind, {
-        state: "ready",
-        source: "passive",
-        message: "Ready, quiet phase",
-        checkedAt: record.checkedAt || "",
-        scannedAt: record.scannedAt || record.result?.scannedAt || "",
-        opponentDone: record.result?.opponentCount || 0,
-        opponentTotal: record.result?.opponentCount || 0,
-        profileDone: defaultProfileTotal(kind, record.result?.opponentCount || 0),
-        profileTotal: defaultProfileTotal(kind, record.result?.opponentCount || 0),
-        lastError: ""
+    const insideQuiet = record.result && Number.isFinite(scannedAt) && now - scannedAt < FULL_SCAN_QUIET_MS;
+    const checkedRecently = Number.isFinite(checkedAt) && now - checkedAt < LIST_CHECK_INTERVAL_MS;
+    if (!options.force && checkedRecently) {
+      const skipped = insideQuiet ? "quiet" : "fresh";
+      log(insideQuiet ? "skip list check; quiet phase checked recently" : "skip list check; checked recently", {
+        kind,
+        checkedAt: record.checkedAt,
+        scannedAt: record.scannedAt || record.result?.scannedAt || ""
       });
-      return { kind, skipped: "quiet" };
-    }
-    if (!options.force && Number.isFinite(checkedAt) && now - checkedAt < LIST_CHECK_INTERVAL_MS) {
-      log("skip list check; checked recently", { kind, checkedAt: record.checkedAt });
       await updateScanStatus(kind, {
         state: record.result ? "ready" : "skipped",
         source: "passive",
-        message: record.result ? "Ready, checked recently" : "Checked recently",
+        message: record.result
+          ? "Ready"
+          : "Checked recently",
         checkedAt: record.checkedAt || "",
         scannedAt: record.scannedAt || record.result?.scannedAt || "",
         opponentDone: record.result?.opponentCount || 0,
@@ -180,7 +176,7 @@
         profileTotal: defaultProfileTotal(kind, record.result?.opponentCount || 0),
         lastError: ""
       });
-      return { kind, skipped: "fresh" };
+      return { kind, skipped };
     }
 
     const lockId = await acquirePassiveLock(kind, now);
@@ -234,7 +230,7 @@
             concurrency: SCAN_CONCURRENCY,
             lockId,
             scanSource: "passive-list",
-            updateLastResult: currentArenaKind(options.url) === kind
+            updateLastResult: options.preferredKind === kind || currentArenaKind(options.url) === kind
           });
           await releasePassiveLock(kind, lockId, (current) => current);
           return { kind, ...ensured };
@@ -320,7 +316,7 @@
       await updateScanStatus(kind, {
         state: "ready",
         source: options.scanSource || "unknown",
-        message: options.scanSource === "passive-list" ? "Ready, opponent list unchanged" : "Ready, cache matches opponent list",
+        message: "Ready",
         checkedAt,
         scannedAt: record.scannedAt || record.result?.scannedAt || "",
         opponentDone: record.result?.opponentCount || entries.length,
@@ -408,6 +404,7 @@
     const fingerprint = options.fingerprint || ARENA.arenaOpponentFingerprint(entries);
     const delayMs = Number(options.delayMs) || MANUAL_SCAN_DELAY_MS;
     const concurrency = Math.max(1, Math.min(ARENA.parseInteger(options.concurrency) || SCAN_CONCURRENCY, entries.length));
+    const selfProfile = arenaKind === "single" ? await readSelfProfileCache() : null;
     const opponents = new Array(entries.length);
     const progress = {
       kind: arenaKind,
@@ -442,7 +439,7 @@
           name: entry.opponent.name,
           profileUrl: safeUrl(entry.opponent.profileUrl)
         });
-        opponents[index] = await scanOpponentEntry(entry, formula, { delayMs, progress });
+        opponents[index] = await scanOpponentEntry(entry, formula, { delayMs, progress, selfProfile });
         progress.opponentDone += 1;
         await updateScanStatus(arenaKind, {
           state: "scanning",
@@ -459,8 +456,9 @@
     }
     await Promise.all(Array.from({ length: concurrency }, () => worker()));
 
-    const successful = opponents.filter((entry) => Number.isFinite(entry.score));
-    const best = [...successful].sort((a, b) => a.score - b.score)[0] || null;
+    const best = arenaKind === "team"
+      ? bestScoreResult(opponents)
+      : bestSimulationResult(opponents);
 
     const result = {
       scannedAt: new Date().toISOString(),
@@ -474,6 +472,9 @@
       failedCount: opponents.filter((entry) => entry.error).length,
       bestName: best?.displayName || "",
       bestScore: best?.score || 0,
+      bestWinRate: best?.simulation?.winRate || 0,
+      bestLossRate: best?.simulation?.lossRate || 0,
+      bestDrawRate: best?.simulation?.drawRate || 0,
       opponents
     };
     log("profile scanning finished", { kind: arenaKind, count: result.opponentCount, failed: result.failedCount });
@@ -491,7 +492,7 @@
       countedBaseProfile = true;
       return arenaKind === "team"
         ? await scanTeamOpponent(entry, html, formula, options)
-        : scanSingleOpponent(entry, html, formula, profileUrl);
+        : scanSingleOpponent(entry, html, formula, profileUrl, options);
     } catch (error) {
       if (!countedBaseProfile) await incrementProfileProgress(options.progress);
       log("opponent profile scan failed", {
@@ -504,12 +505,13 @@
         opponent: { ...entry.opponent },
         score: Number.POSITIVE_INFINITY,
         displayName: entry.opponent.name,
+        simulation: simulationUnavailable(["opponent profile"]),
         error: error.message || String(error)
       };
     }
   }
 
-  function scanSingleOpponent(entry, html, formula, profileUrl) {
+  function scanSingleOpponent(entry, html, formula, profileUrl, options = {}) {
     const character = parseCharacterFromHtml(html, {
       ...entry.opponent,
       profileUrl: profileUrl || entry.opponent.profileUrl,
@@ -519,7 +521,7 @@
     });
     const scored = ARENA.scoreArenaCharacter(character, formula);
 
-    return {
+    const result = {
       rowIndex: entry.opponent.rowIndex,
       opponent: { ...entry.opponent },
       displayName: character.name,
@@ -527,6 +529,10 @@
       matches: scored.matches,
       formulaSection: scored.sectionKey,
       character
+    };
+    return {
+      ...result,
+      simulation: simulateSingleOpponent(options.selfProfile, result)
     };
   }
 
@@ -573,7 +579,58 @@
       displayName: entry.opponent.name,
       score: team.totalScore,
       matches: team.matches,
+      simulation: simulationUnavailable(["team simulation not supported"]),
       team
+    };
+  }
+
+  function simulateSingleOpponent(selfProfile, opponentResult) {
+    if (!SIM?.simulationReadiness || !SIM?.simulateOddsPvP) {
+      return simulationUnavailable(["simulation engine"]);
+    }
+    const readiness = SIM.simulationReadiness(selfProfile, opponentResult);
+    if (!readiness.ready) return simulationUnavailable(readiness.missing, readiness.warnings);
+
+    return SIM.simulateOddsPvP(
+      selfProfile.character.combat.combatant,
+      opponentResult.character.combat.combatant
+    );
+  }
+
+  function bestSimulationResult(opponents = []) {
+    return [...opponents]
+      .filter((entry) => entry?.simulation?.ready)
+      .sort((a, b) => {
+        const winDiff = (b.simulation.winRate || 0) - (a.simulation.winRate || 0);
+        if (winDiff) return winDiff;
+        const lossDiff = (a.simulation.lossRate || 0) - (b.simulation.lossRate || 0);
+        if (lossDiff) return lossDiff;
+        return (a.opponent?.rowIndex || a.rowIndex || 0) - (b.opponent?.rowIndex || b.rowIndex || 0);
+      })[0] || null;
+  }
+
+  function bestScoreResult(opponents = []) {
+    return [...opponents]
+      .filter((entry) => Number.isFinite(entry?.score))
+      .sort((a, b) => {
+        const scoreDiff = a.score - b.score;
+        if (scoreDiff) return scoreDiff;
+        return (a.opponent?.rowIndex || a.rowIndex || 0) - (b.opponent?.rowIndex || b.rowIndex || 0);
+      })[0] || null;
+  }
+
+  function simulationUnavailable(missing = [], warnings = []) {
+    return {
+      ready: false,
+      iterations: 0,
+      wins: 0,
+      losses: 0,
+      draws: 0,
+      winRate: 0,
+      lossRate: 0,
+      drawRate: 0,
+      missing: Array.isArray(missing) ? missing : [String(missing || "simulation unavailable")],
+      warnings: Array.isArray(warnings) ? warnings : []
     };
   }
 
