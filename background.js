@@ -132,6 +132,7 @@ const AUCTION_CONTENT_FILES = [
   "arena-sim.js",
   "arena-scan.js",
   "arena-passive-content.js",
+  "arena-fight.js",
   "arena-status-content.js",
   "auction-content.js",
   "arena-content.js"

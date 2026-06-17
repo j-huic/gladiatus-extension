@@ -526,7 +526,8 @@ const { schema, score, model, core, arena, sim } = loadGlobals();
   const repairFiles = backgroundSource.match(/const AUCTION_CONTENT_FILES = \[([\s\S]*?)\];/)?.[1] || "";
   assert.ok(repairFiles.indexOf("\"arena-sim.js\"") < repairFiles.indexOf("\"arena-scan.js\""));
   assert.ok(repairFiles.indexOf("\"arena-scan.js\"") < repairFiles.indexOf("\"arena-passive-content.js\""));
-  assert.ok(repairFiles.indexOf("\"arena-passive-content.js\"") < repairFiles.indexOf("\"arena-status-content.js\""));
+  assert.ok(repairFiles.indexOf("\"arena-passive-content.js\"") < repairFiles.indexOf("\"arena-fight.js\""));
+  assert.ok(repairFiles.indexOf("\"arena-fight.js\"") < repairFiles.indexOf("\"arena-status-content.js\""));
   assert.ok(repairFiles.indexOf("\"arena-status-content.js\"") < repairFiles.indexOf("\"arena-content.js\""));
   assert.equal(repairFiles.includes("arena-background-scan.js"), false);
   assert.equal(repairFiles.includes("auction-background-scan.js"), false);
@@ -541,13 +542,15 @@ const { schema, score, model, core, arena, sim } = loadGlobals();
     "arena-sim.js",
     "arena-scan.js",
     "arena-passive-content.js",
+    "arena-fight.js",
     "arena-status-content.js",
     "auction-content.js",
     "arena-content.js"
   ]);
   assert.ok(isolatedEntries[0].js.indexOf("arena-sim.js") < isolatedEntries[0].js.indexOf("arena-scan.js"));
   assert.ok(isolatedEntries[0].js.indexOf("arena-scan.js") < isolatedEntries[0].js.indexOf("arena-passive-content.js"));
-  assert.ok(isolatedEntries[0].js.indexOf("arena-passive-content.js") < isolatedEntries[0].js.indexOf("arena-status-content.js"));
+  assert.ok(isolatedEntries[0].js.indexOf("arena-passive-content.js") < isolatedEntries[0].js.indexOf("arena-fight.js"));
+  assert.ok(isolatedEntries[0].js.indexOf("arena-fight.js") < isolatedEntries[0].js.indexOf("arena-status-content.js"));
   assert.ok(isolatedEntries[0].js.indexOf("arena-status-content.js") < isolatedEntries[0].js.indexOf("arena-content.js"));
   assert.match(arenaScanSource, /GLAD_ARENA_REFRESH_SELF_PROFILE/);
   assert.match(backgroundSource, /GLAD_ARENA_REFRESH_SELF_PROFILE/);
@@ -573,6 +576,16 @@ const { schema, score, model, core, arena, sim } = loadGlobals();
   assert.match(arenaStatusContentSource, /chrome\.storage\.onChanged\.addListener/);
   assert.match(arenaStatusContentSource, /\.\.\.STATUS_KINDS\.map/);
   assert.doesNotMatch(arenaStatusContentSource, /GLAD_ARENA_PASSIVE_CHECK|GLAD_ARENA_FORCE_SCAN|GLAD_ARENA_ENSURE_VISIBLE_SCAN/);
+  assert.match(arenaStatusContentSource, /GladiatusArenaFight/);
+  assert.match(arenaStatusContentSource, /glad-arena-fight-button/);
+  const arenaFightSource = fs.readFileSync(path.join(rootDir, "arena-fight.js"), "utf8");
+  assert.match(arenaFightSource, /root\.GladiatusArenaFight/);
+  assert.match(arenaFightSource, /submod=doCombat/);
+  assert.match(arenaFightSource, /doGroupFight\.php/);
+  assert.match(arenaFightSource, /doArenaFight\.php/);
+  assert.match(arenaFightSource, /X-CSRF-Token/);
+  // The fight module must stay UI-agnostic so the button can be relocated freely.
+  assert.doesNotMatch(arenaFightSource, /glad-arena-passive-status|glad-arena-fight-button|createElement|document\.body/);
   const arenaContentSource = fs.readFileSync(path.join(rootDir, "arena-content.js"), "utf8");
   assert.match(arenaContentSource, /__GladiatusArenaContentBootstrapped/);
   assert.match(arenaContentSource, /GLAD_ARENA_BOOT_V2/);
@@ -590,7 +603,8 @@ const { schema, score, model, core, arena, sim } = loadGlobals();
   assert.match(backgroundArenaSource, /console\.warn\(LOG_PREFIX/);
   assert.match(popupRuntimeSource, /ensureAuctionContentScript\(tab\.id\);\s+return sendTabMessage\(tab\.id, message\);/);
   assert.ok(popupRuntimeSource.indexOf("\"arena-scan.js\"") < popupRuntimeSource.indexOf("\"arena-passive-content.js\""));
-  assert.ok(popupRuntimeSource.indexOf("\"arena-passive-content.js\"") < popupRuntimeSource.indexOf("\"arena-status-content.js\""));
+  assert.ok(popupRuntimeSource.indexOf("\"arena-passive-content.js\"") < popupRuntimeSource.indexOf("\"arena-fight.js\""));
+  assert.ok(popupRuntimeSource.indexOf("\"arena-fight.js\"") < popupRuntimeSource.indexOf("\"arena-status-content.js\""));
   assert.ok(popupRuntimeSource.indexOf("\"arena-status-content.js\"") < popupRuntimeSource.indexOf("\"arena-content.js\""));
   assert.equal(fs.existsSync(path.join(rootDir, "content.js")), false);
 
@@ -1683,6 +1697,83 @@ async function runBackgroundScannerTests() {
   await errorContext.scanner.passiveCheck({ url: singleArenaUrl, preferredKind: "single" });
   assert.equal(errorStorage[statusKey].single.state, "error");
   assert.equal(errorStorage[statusKey].single.message, "Error fetching list");
+}
+
+{
+  // arena-fight.js: fight-request construction, isolated from any UI.
+  const context = {
+    console,
+    URL,
+    Date,
+    Math,
+    chrome: { runtime: { id: "test" } }
+  };
+  context.window = context;
+  context.globalThis = context;
+  vm.createContext(context);
+  for (const file of ["score-model.js", "arena-core.js", "arena-fight.js"]) {
+    vm.runInContext(fs.readFileSync(path.join(rootDir, file), "utf8"), context, { filename: file });
+  }
+  const fight = context.GladiatusArenaFight;
+  assert.ok(fight, "GladiatusArenaFight should be defined");
+
+  const circusSource = "https://s47-en.gladiatus.gameforge.com/game/index.php?mod=arena&submod=serverArena&aType=3&sh=ABC";
+  const circusEndpoint = fight.fightEndpoint({ id: "219126", province: "306", language: "en", arenaKind: "team" }, circusSource);
+  assert.equal(circusEndpoint.path, "ajax.php");
+  assert.equal(circusEndpoint.opponentId, "219126");
+  assert.ok(circusEndpoint.data.includes("submod=doCombat"));
+  assert.ok(circusEndpoint.data.includes("aType=3"));
+  assert.ok(circusEndpoint.data.includes("opponentId=219126"));
+  assert.ok(circusEndpoint.data.includes("serverId=306"));
+  assert.ok(circusEndpoint.data.includes("country=en"));
+
+  const arenaEndpoint = fight.fightEndpoint(
+    { id: "555", province: "47", language: "en", arenaKind: "single" },
+    "https://s47-en.gladiatus.gameforge.com/game/index.php?mod=arena&submod=serverArena&aType=2&sh=ABC"
+  );
+  assert.ok(arenaEndpoint.data.includes("aType=2"));
+
+  const groupEndpoint = fight.fightEndpoint(
+    { id: "777", arenaKind: "team" },
+    "https://s47-en.gladiatus.gameforge.com/game/index.php?mod=arena&submod=grouparena&sh=ABC"
+  );
+  assert.equal(groupEndpoint.path, "ajax/doGroupFight.php");
+  assert.equal(groupEndpoint.data, "did=777");
+
+  const plainEndpoint = fight.fightEndpoint(
+    { id: "888", arenaKind: "single" },
+    "https://s47-en.gladiatus.gameforge.com/game/index.php?mod=arena&sh=ABC"
+  );
+  assert.equal(plainEndpoint.path, "ajax/doArenaFight.php");
+  assert.equal(plainEndpoint.data, "did=888");
+  assert.equal(fight.fightEndpoint({ id: "" }, circusSource), null);
+
+  // Best target comes from the stored result's bestName.
+  const result = {
+    arenaKind: "team",
+    sourceUrl: circusSource,
+    bestName: "AedileAulus",
+    opponents: [
+      { displayName: "Erudito", score: 50, opponent: { id: "31675", name: "Erudito", province: "306", language: "en", arenaKind: "team" } },
+      { displayName: "AedileAulus", score: 40, opponent: { id: "219126", name: "AedileAulus", province: "306", language: "en", arenaKind: "team" } }
+    ]
+  };
+  const target = fight.bestTargetFromResult(result);
+  assert.equal(target.name, "AedileAulus");
+  assert.equal(target.opponentId, "219126");
+  assert.ok(target.request.data.includes("opponentId=219126"));
+  assert.equal(fight.bestTargetFromResult({ opponents: [] }), null);
+  assert.equal(fight.bestTargetFromResult(null), null);
+
+  // buildFightRequest assembles the URL + headers and requires both tokens.
+  const built = fight.buildFightRequest(target, { origin: "https://s47-en.gladiatus.gameforge.com", sh: "ABC", csrfToken: "CSRF" });
+  assert.ok(built.url.startsWith("https://s47-en.gladiatus.gameforge.com/game/ajax.php?"));
+  assert.ok(built.url.includes("submod=doCombat"));
+  assert.ok(built.url.includes("&sh=ABC"));
+  assert.equal(built.options.method, "GET");
+  assert.equal(built.options.headers["X-CSRF-Token"], "CSRF");
+  assert.throws(() => fight.buildFightRequest(target, { origin: "https://x", sh: "ABC", csrfToken: "" }), /CSRF/);
+  assert.throws(() => fight.buildFightRequest(target, { origin: "https://x", sh: "", csrfToken: "C" }), /secure hash/);
 }
 
 async function runAsyncTests() {

@@ -131,7 +131,7 @@ export async function ensureAuctionContentScript(tabId) {
 
   await chrome.scripting.executeScript({
     target: { tabId },
-    files: ["auction-schema.js", "score-model.js", "auction-model.js", "auction-core.js", "arena-core.js", "arena-sim.js", "arena-scan.js", "arena-passive-content.js", "arena-status-content.js", "auction-content.js", "arena-content.js"]
+    files: ["auction-schema.js", "score-model.js", "auction-model.js", "auction-core.js", "arena-core.js", "arena-sim.js", "arena-scan.js", "arena-passive-content.js", "arena-fight.js", "arena-status-content.js", "auction-content.js", "arena-content.js"]
   });
 }
 
