@@ -273,6 +273,36 @@ tr.glad-arena-best > td {
   background: #d5685d;
 }
 
+.glad-arena-header-button {
+  background: #3b2817;
+  border: 1px solid #7f9654;
+  border-radius: 3px;
+  box-sizing: border-box;
+  color: #d9e7a4;
+  cursor: pointer;
+  float: left;
+  font-size: 11px;
+  height: 20px;
+  line-height: 18px;
+  margin: 2px 5px 0;
+  padding: 0 4px;
+}
+
+.glad-arena-header-button:hover {
+  background: #4a3420;
+  border-color: #8fb35a;
+}
+
+.glad-arena-header-button-busy {
+  opacity: 0.6;
+  pointer-events: none;
+}
+
+.glad-arena-header-button-error {
+  border-color: #9d3f32;
+  color: #ffb4a8;
+}
+
 .glad-arena-fight-button {
   background: #3b2817;
   border: 1px solid #7f9654;
