@@ -506,6 +506,7 @@ const { schema, score, model, core, arena, sim } = loadGlobals();
 {
   const manifest = JSON.parse(fs.readFileSync(path.join(rootDir, "manifest.json"), "utf8"));
   const backgroundSource = fs.readFileSync(path.join(rootDir, "background.js"), "utf8");
+  const backgroundArenaSource = fs.readFileSync(path.join(rootDir, "arena-background-scan.js"), "utf8");
   const arenaScanSource = fs.readFileSync(path.join(rootDir, "arena-scan.js"), "utf8");
   const arenaPassiveContentSource = fs.readFileSync(path.join(rootDir, "arena-passive-content.js"), "utf8");
   const arenaStatusContentSource = fs.readFileSync(path.join(rootDir, "arena-status-content.js"), "utf8");
@@ -558,9 +559,14 @@ const { schema, score, model, core, arena, sim } = loadGlobals();
   assert.doesNotMatch(arenaScanSource, /MutationObserver/);
   assert.doesNotMatch(arenaScanSource, /setInterval\(/);
   assert.doesNotMatch(arenaScanSource, /GLAD_ARENA_PASSIVE_CHECK/);
+  assert.match(backgroundSource, /schedulePassiveCheck/);
+  assert.match(backgroundArenaSource, /function schedulePassiveCheck/);
   assert.match(arenaPassiveContentSource, /GLAD_ARENA_PASSIVE_CHECK/);
   assert.match(arenaPassiveContentSource, /const FIGHT_CLICK_SCAN_DELAY_MS = 5 \* 1000/);
+  assert.match(arenaPassiveContentSource, /delayMs: FIGHT_CLICK_SCAN_DELAY_MS/);
+  assert.match(arenaPassiveContentSource, /delayMs: AFTER_FIGHT_CHECK_DELAY_MS/);
   assert.match(arenaPassiveContentSource, /function handleFightTriggerClick/);
+  assert.doesNotMatch(arenaPassiveContentSource, /fightClickScanTimer|afterFightCheckTimer/);
   assert.doesNotMatch(arenaPassiveContentSource, /glad-arena-passive-status|glad-arena-score/);
   assert.doesNotMatch(arenaPassiveContentSource, /setInterval\(/);
   assert.match(arenaStatusContentSource, /const STATUS_BOX_ID = "glad-arena-passive-status"/);
@@ -574,7 +580,14 @@ const { schema, score, model, core, arena, sim } = loadGlobals();
   assert.match(arenaContentSource, /function refreshVisibleScanInBackground/);
   assert.match(arenaContentSource, /function scheduleVisibleScanRetry/);
   assert.match(arenaContentSource, /function opponentIdentityKeys/);
+  assert.match(arenaContentSource, /bestSimulationResult\(opponents\) \|\| bestScoreResult\(opponents\)/);
+  assert.doesNotMatch(arenaContentSource, /Win \?/);
   assert.doesNotMatch(arenaContentSource, /glad-arena-passive-status|GLAD_ARENA_PASSIVE_CHECK|startFight|startGroupFight|startProvinciarumFight/);
+  assert.match(backgroundArenaSource, /bestSimulationResult\(opponents\) \|\| bestScoreResult\(opponents\)/);
+  assert.match(backgroundArenaSource, /single simulation readiness failed/);
+  assert.match(backgroundArenaSource, /self simulation profile state/);
+  assert.match(backgroundArenaSource, /single scan completed without win simulations/);
+  assert.match(backgroundArenaSource, /console\.warn\(LOG_PREFIX/);
   assert.match(popupRuntimeSource, /ensureAuctionContentScript\(tab\.id\);\s+return sendTabMessage\(tab\.id, message\);/);
   assert.ok(popupRuntimeSource.indexOf("\"arena-scan.js\"") < popupRuntimeSource.indexOf("\"arena-passive-content.js\""));
   assert.ok(popupRuntimeSource.indexOf("\"arena-passive-content.js\"") < popupRuntimeSource.indexOf("\"arena-status-content.js\""));
@@ -1202,7 +1215,7 @@ const { schema, score, model, core, arena, sim } = loadGlobals();
       profileUrl: entry.opponent.profileUrl.replace("sh=test", "sh=other")
     }
   }))));
-  assert.notEqual(fingerprint, arena.arenaOpponentFingerprint(entries.slice().reverse()));
+  assert.equal(fingerprint, arena.arenaOpponentFingerprint(entries.slice().reverse()));
 }
 
 {
@@ -1501,6 +1514,8 @@ async function runBackgroundScannerTests() {
   assert.equal(storage[cacheKey].single.result.opponents[0].character.doll, 1);
   assert.equal(storage[cacheKey].single.result.opponents[0].simulation.ready, false);
   assert.deepEqual(JSON.parse(JSON.stringify(storage[cacheKey].single.result.opponents[0].simulation.missing)), ["opponent hp"]);
+  assert.equal(storage[cacheKey].single.result.bestName, "Alpha");
+  assert.equal(storage[cacheKey].single.result.bestScore, storage[cacheKey].single.result.opponents[0].score);
   assert.equal(storage[cacheKey].team.result.bestName, "Bravo");
   assert.equal(storage[cacheKey].team.result.bestScore, storage[cacheKey].team.result.opponents[0].score);
   assert.equal(storage[cacheKey].team.result.bestWinRate, 0);

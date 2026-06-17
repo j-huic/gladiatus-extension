@@ -11,14 +11,19 @@
   const LOCK_TIMEOUT_MS = 5 * 60 * 1000;
   const MANUAL_SCAN_DELAY_MS = 150;
   const PASSIVE_SCAN_DELAY_MS = 900;
+  const MAX_PASSIVE_TRIGGER_DELAY_MS = 30 * 1000;
   const SCAN_CONCURRENCY = 2;
   const RETRYABLE_PROFILE_STATUSES = new Set([429, 500, 502, 503, 504]);
   const LOG_PREFIX = "[Gladiatus Background Scanner]";
+  // Flip to true for verbose per-step scan logging. Off by default keeps the
+  // console to a single "Scanning: A, B, C" line per scan.
+  const VERBOSE_LOGGING = false;
   const KINDS = ["team", "single"];
   const KIND_LABELS = {
     single: "Arena",
     team: "Circus"
   };
+  const delayedPassiveChecks = new Map();
 
   function isGladiatusGamePage(url) {
     try {
@@ -42,6 +47,18 @@
 
   function kindLabel(kind) {
     return KIND_LABELS[kind] || kind;
+  }
+
+  function normalizePassiveDelay(value) {
+    const parsed = ARENA.parseInteger(value);
+    if (!Number.isFinite(parsed) || parsed <= 0) return 0;
+    return Math.min(parsed, MAX_PASSIVE_TRIGGER_DELAY_MS);
+  }
+
+  function delayedPassiveCheckKey(options = {}) {
+    const preferred = KINDS.includes(options.preferredKind) ? options.preferredKind : "";
+    if (options.onlyPreferred && preferred) return preferred;
+    return preferred || currentArenaKind(options.url || "") || "all";
   }
 
   function arenaListCandidates(kind, currentUrl = "", storedUrl = "") {
@@ -90,6 +107,47 @@
 
     log("passive check finished", { results });
     return results;
+  }
+
+  function schedulePassiveCheck(options = {}) {
+    const delayMs = normalizePassiveDelay(options.delayMs);
+    if (!delayMs) return passiveCheck(options);
+    if (!isGladiatusGamePage(options.url || "")) return Promise.resolve([]);
+
+    const key = delayedPassiveCheckKey(options);
+    const existing = delayedPassiveChecks.get(key);
+    if (existing) {
+      clearTimeout(existing.timerId);
+      existing.resolve([{ kind: existing.kind || key, skipped: "rescheduled" }]);
+      delayedPassiveChecks.delete(key);
+    }
+
+    log("scheduled delayed passive check", {
+      key,
+      kind: options.preferredKind || currentArenaKind(options.url || ""),
+      delayMs,
+      reason: options.reason || "",
+      url: safeUrl(options.url || "")
+    });
+
+    return new Promise((resolve, reject) => {
+      const timerId = setTimeout(() => {
+        delayedPassiveChecks.delete(key);
+        log("running delayed passive check", {
+          key,
+          kind: options.preferredKind || currentArenaKind(options.url || ""),
+          reason: options.reason || "",
+          url: safeUrl(options.url || "")
+        });
+        passiveCheck(options).then(resolve, reject);
+      }, delayMs);
+
+      delayedPassiveChecks.set(key, {
+        timerId,
+        resolve,
+        kind: KINDS.includes(options.preferredKind) ? options.preferredKind : ""
+      });
+    });
   }
 
   async function ensureVisibleScan({ url = "", entries = [], formula = null } = {}) {
@@ -325,6 +383,11 @@
         profileTotal: defaultProfileTotal(kind, record.result?.opponentCount || entries.length),
         lastError: ""
       });
+      logSimulationSummary(record.result, {
+        source: options.scanSource || "unknown",
+        cached: true,
+        skipped: "unchanged"
+      });
       log("scan data already matches opponent list", { kind, source: options.scanSource || "unknown", count: entries.length });
       return { result: record.result, skipped: "unchanged" };
     }
@@ -416,7 +479,17 @@
     };
     let nextIndex = 0;
 
-    log("commence profile scanning", { kind: arenaKind, count: entries.length, concurrency, delayMs, sourceUrl: safeUrl(options.sourceUrl || "") });
+    if (arenaKind === "single") {
+      log("self simulation profile state", {
+        source: options.scanSource || "unknown",
+        present: Boolean(selfProfile?.character),
+        scannedAt: selfProfile?.scannedAt || "",
+        ageMs: selfProfileAgeMs(selfProfile),
+        profileUrl: safeUrl(selfProfile?.profileUrl || ""),
+        combat: combatDiagnostics(selfProfile?.character)
+      });
+    }
+    console.log(`${LOG_PREFIX} Scanning: ${opponentNames(entries).join(", ")}`);
     await updateScanStatus(arenaKind, {
       state: "scanning",
       source: progress.source,
@@ -458,7 +531,7 @@
 
     const best = arenaKind === "team"
       ? bestScoreResult(opponents)
-      : bestSimulationResult(opponents);
+      : bestSimulationResult(opponents) || bestScoreResult(opponents);
 
     const result = {
       scannedAt: new Date().toISOString(),
@@ -478,6 +551,10 @@
       opponents
     };
     log("profile scanning finished", { kind: arenaKind, count: result.opponentCount, failed: result.failedCount });
+    logSimulationSummary(result, {
+      source: options.scanSource || "unknown",
+      cached: false
+    });
     return result;
   }
 
@@ -530,9 +607,19 @@
       formulaSection: scored.sectionKey,
       character
     };
+    const simulation = simulateSingleOpponent(options.selfProfile, result);
+    log("single opponent profile parsed", {
+      rowIndex: entry.opponent.rowIndex,
+      name: character.name,
+      score: scored.score,
+      matches: scored.matches,
+      simulationReady: Boolean(simulation?.ready),
+      simulationMissing: simulation?.missing || [],
+      combat: combatDiagnostics(character)
+    });
     return {
       ...result,
-      simulation: simulateSingleOpponent(options.selfProfile, result)
+      simulation
     };
   }
 
@@ -586,15 +673,36 @@
 
   function simulateSingleOpponent(selfProfile, opponentResult) {
     if (!SIM?.simulationReadiness || !SIM?.simulateOddsPvP) {
+      log("single simulation unavailable", {
+        name: opponentResult?.displayName || opponentResult?.opponent?.name || "",
+        missing: ["simulation engine"]
+      });
       return simulationUnavailable(["simulation engine"]);
     }
     const readiness = SIM.simulationReadiness(selfProfile, opponentResult);
-    if (!readiness.ready) return simulationUnavailable(readiness.missing, readiness.warnings);
+    if (!readiness.ready) {
+      log("single simulation readiness failed", {
+        name: opponentResult?.displayName || opponentResult?.opponent?.name || "",
+        missing: readiness.missing,
+        warnings: readiness.warnings,
+        self: combatDiagnostics(selfProfile?.character),
+        opponent: combatDiagnostics(opponentResult?.character)
+      });
+      return simulationUnavailable(readiness.missing, readiness.warnings);
+    }
 
-    return SIM.simulateOddsPvP(
+    const simulation = SIM.simulateOddsPvP(
       selfProfile.character.combat.combatant,
       opponentResult.character.combat.combatant
     );
+    log("single simulation ready", {
+      name: opponentResult?.displayName || opponentResult?.opponent?.name || "",
+      winRate: simulation.winRate,
+      lossRate: simulation.lossRate,
+      drawRate: simulation.drawRate,
+      iterations: simulation.iterations
+    });
+    return simulation;
   }
 
   function bestSimulationResult(opponents = []) {
@@ -632,6 +740,80 @@
       missing: Array.isArray(missing) ? missing : [String(missing || "simulation unavailable")],
       warnings: Array.isArray(warnings) ? warnings : []
     };
+  }
+
+  function logSimulationSummary(result, options = {}) {
+    if (result?.arenaKind !== "single") return;
+    const opponents = Array.isArray(result.opponents) ? result.opponents : [];
+    if (!opponents.length) return;
+
+    const readyCount = opponents.filter((entry) => entry?.simulation?.ready).length;
+    const unavailableCount = opponents.length - readyCount;
+    const details = {
+      source: options.source || "unknown",
+      cached: Boolean(options.cached),
+      skipped: options.skipped || "",
+      scannedAt: result.scannedAt || "",
+      opponentCount: opponents.length,
+      simulationReady: readyCount,
+      simulationUnavailable: unavailableCount,
+      missing: simulationMissingSummary(opponents)
+    };
+
+    if (!readyCount) {
+      warn("single scan completed without win simulations", details);
+      return;
+    }
+    if (unavailableCount) {
+      log("single scan simulation partially available", details);
+      return;
+    }
+    log("single scan simulation available", details);
+  }
+
+  function simulationMissingSummary(opponents = []) {
+    const counts = {};
+    for (const entry of opponents) {
+      if (entry?.simulation?.ready) continue;
+      const missing = Array.isArray(entry?.simulation?.missing) ? entry.simulation.missing : [];
+      for (const key of missing) {
+        const label = String(key || "unknown");
+        counts[label] = (counts[label] || 0) + 1;
+      }
+    }
+    return counts;
+  }
+
+  function combatDiagnostics(character) {
+    const combat = character?.combat || {};
+    const combatant = combat.combatant || {};
+    return {
+      ready: Boolean(combat.ready),
+      missing: Array.isArray(combat.missing) ? combat.missing : [],
+      warnings: Array.isArray(combat.warnings) ? combat.warnings : [],
+      level: ARENA.parseInteger(combatant.level),
+      hp: ARENA.parseInteger(combatant.hp),
+      maxHp: ARENA.parseInteger(combatant.maxHp),
+      damageMin: ARENA.parseInteger(combatant.damageMin),
+      damageMax: ARENA.parseInteger(combatant.damageMax),
+      armour: ARENA.parseInteger(combatant.armour),
+      armourAbsorbMin: ARENA.parseInteger(combatant.armourAbsorbMin),
+      armourAbsorbMax: ARENA.parseInteger(combatant.armourAbsorbMax),
+      strength: ARENA.parseInteger(combatant.strength),
+      dexterity: ARENA.parseInteger(combatant.dexterity),
+      agility: ARENA.parseInteger(combatant.agility),
+      constitution: ARENA.parseInteger(combatant.constitution),
+      charisma: ARENA.parseInteger(combatant.charisma),
+      intelligence: ARENA.parseInteger(combatant.intelligence),
+      critChance: Number(combatant.critChance) || 0,
+      blockChance: Number(combatant.blockChance) || 0,
+      critAvoidChance: Number(combatant.critAvoidChance) || 0
+    };
+  }
+
+  function selfProfileAgeMs(record) {
+    const timestamp = Date.parse(record?.scannedAt || "");
+    return Number.isFinite(timestamp) ? Math.max(0, Date.now() - timestamp) : null;
   }
 
   function readArenaOpponentEntriesFromHtml(html, baseUrl = "") {
@@ -1022,7 +1204,12 @@
     const cacheKey = selfProfileCacheKey(profileUrl);
 
     if (!options.force && isFreshSelfProfile(cached, cacheKey)) {
-      log("self profile cache fresh", { playerId });
+      log("self profile cache fresh", {
+        playerId,
+        scannedAt: cached.scannedAt || "",
+        ageMs: selfProfileAgeMs(cached),
+        combat: combatDiagnostics(cached.character)
+      });
       return cached;
     }
 
@@ -1042,7 +1229,11 @@
       character
     };
     await chrome.storage.local.set({ [ARENA.selfProfileStorageKey]: record });
-    log("self profile refreshed", { playerId, ready: Boolean(character?.combat?.ready) });
+    log("self profile refreshed", {
+      playerId,
+      ready: Boolean(character?.combat?.ready),
+      combat: combatDiagnostics(character)
+    });
     return record;
   }
 
@@ -1196,7 +1387,11 @@
   }
 
   function log(message, details = {}) {
-    console.log(LOG_PREFIX, message, details);
+    if (VERBOSE_LOGGING) console.log(LOG_PREFIX, message, details);
+  }
+
+  function warn(message, details = {}) {
+    console.warn(LOG_PREFIX, message, details);
   }
 
   function safeUrl(value) {
@@ -1207,6 +1402,12 @@
     } catch {
       return String(value || "");
     }
+  }
+
+  function opponentNames(entries = []) {
+    return (entries || [])
+      .map((entry) => String(entry?.opponent?.name ?? entry?.name ?? "").replace(/\s+/g, " ").trim())
+      .filter(Boolean);
   }
 
   root.GladiatusArenaBackgroundScanner = {
@@ -1224,6 +1425,7 @@
     readArenaOpponentEntriesFromHtml,
     readProfileDollTabsFromHtml,
     refreshSelfProfile,
+    schedulePassiveCheck,
     scanEntries
   };
 })();

@@ -1117,6 +1117,7 @@
         String(opponent?.id || ""),
         normalizeFingerprintUrl(opponent?.profileUrl || "")
       ].join(":"))
+      .sort()
       .join("|");
   }
 

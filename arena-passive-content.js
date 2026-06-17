@@ -15,8 +15,6 @@
   const AFTER_FIGHT_CHECK_DELAY_MS = 1500;
   const FIGHT_CLICK_SCAN_DELAY_MS = 5 * 1000;
   let passiveBootTimer = 0;
-  let afterFightCheckTimer = 0;
-  let fightClickScanTimer = 0;
   let lastForcedPassiveCheckAt = 0;
   let lastAfterFightSignal = "";
   let lastArenaKind = "";
@@ -85,19 +83,16 @@
     if (!signal || signal === lastAfterFightSignal) return;
     lastAfterFightSignal = signal;
 
-    root.clearTimeout(fightClickScanTimer);
-    root.clearTimeout(afterFightCheckTimer);
-    afterFightCheckTimer = root.setTimeout(() => {
-      const preferredKind = preferredArenaKind();
-      triggerPassiveCheck("after-fight", {
-        force: true,
-        bypassDebounce: true,
-        preferredKind,
-        onlyPreferred: Boolean(preferredKind)
-      }).catch((error) => {
-        console.warn("After-fight arena scan trigger failed.", error);
-      });
-    }, AFTER_FIGHT_CHECK_DELAY_MS);
+    const preferredKind = preferredArenaKind();
+    triggerPassiveCheck("after-fight", {
+      delayMs: AFTER_FIGHT_CHECK_DELAY_MS,
+      force: true,
+      bypassDebounce: true,
+      preferredKind,
+      onlyPreferred: Boolean(preferredKind)
+    }).catch((error) => {
+      console.warn("After-fight arena scan trigger failed.", error);
+    });
   }
 
   function looksLikeArenaAfterFightPage() {
@@ -162,18 +157,16 @@
   }
 
   function scheduleFightClickCheck(kind = "") {
-    root.clearTimeout(fightClickScanTimer);
-    fightClickScanTimer = root.setTimeout(() => {
-      const preferredKind = kind || preferredArenaKind();
-      triggerPassiveCheck("fight-click", {
-        force: true,
-        bypassDebounce: true,
-        preferredKind,
-        onlyPreferred: Boolean(preferredKind)
-      }).catch((error) => {
-        console.warn("Fight-click arena scan trigger failed.", error);
-      });
-    }, FIGHT_CLICK_SCAN_DELAY_MS);
+    const preferredKind = kind || preferredArenaKind();
+    triggerPassiveCheck("fight-click", {
+      delayMs: FIGHT_CLICK_SCAN_DELAY_MS,
+      force: true,
+      bypassDebounce: true,
+      preferredKind,
+      onlyPreferred: Boolean(preferredKind)
+    }).catch((error) => {
+      console.warn("Fight-click arena scan trigger failed.", error);
+    });
   }
 
   function triggerPassiveCheck(_reason, options = {}) {
@@ -189,7 +182,9 @@
       url: root.location?.href || "",
       preferredKind: options.preferredKind || preferredArenaKind(),
       force,
-      onlyPreferred: Boolean(options.onlyPreferred)
+      onlyPreferred: Boolean(options.onlyPreferred),
+      delayMs: ARENA.parseInteger(options.delayMs),
+      reason: _reason
     }).then((response) => {
       if (!response?.ok) throw new Error(response?.error || "Could not run passive arena check.");
       return response.results || [];

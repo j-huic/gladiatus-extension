@@ -22,12 +22,14 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   }
 
   if (message?.type === "GLAD_ARENA_PASSIVE_CHECK") {
-    log("passive arena check requested", { url: safeUrl(message.url) });
-    arenaScanner().passiveCheck({
+    log("passive arena check requested", { url: safeUrl(message.url), delayMs: Number(message.delayMs) || 0, reason: message.reason || "" });
+    arenaScanner().schedulePassiveCheck({
       url: message.url,
       preferredKind: message.preferredKind,
       force: Boolean(message.force),
-      onlyPreferred: Boolean(message.onlyPreferred)
+      onlyPreferred: Boolean(message.onlyPreferred),
+      delayMs: Number(message.delayMs) || 0,
+      reason: message.reason || ""
     })
       .then((results) => sendResponse({ ok: true, results }))
       .catch((error) => {

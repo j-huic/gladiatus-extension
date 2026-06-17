@@ -145,6 +145,8 @@ export function createArenaView({ render, refreshSelfProfile }) {
         : "Profile scan failed"
       : result.simulation?.ready
       ? simulationWinLabel(result)
+      : Number.isFinite(result.score)
+      ? `Power: ${ARENA.formatNumber(result.score)}`
       : result.error ? "Profile scan failed" : "Simulation unavailable";
 
     const meta = document.createElement("div");
@@ -164,7 +166,17 @@ export function createArenaView({ render, refreshSelfProfile }) {
     if (result.arenaKind === "team") {
       return `Lowest team score: ${result.bestName} (${ARENA.formatNumber(result.bestScore)})`;
     }
-    return `Best win chance: ${result.bestName} (${formatPercent(result.bestWinRate)})`;
+    const best = bestResultFromSummary(result);
+    return best?.simulation?.ready
+      ? `Best win chance: ${result.bestName} (${formatPercent(best.simulation.winRate)})`
+      : `Best power: ${result.bestName} (${ARENA.formatNumber(result.bestScore)})`;
+  }
+
+  function bestResultFromSummary(result) {
+    const opponents = result?.opponents || [];
+    return opponents.find((entry) => entry?.displayName === result.bestName)
+      || opponents.find((entry) => entry?.opponent?.name === result.bestName)
+      || null;
   }
 
   function arenaScore(result) {
@@ -186,6 +198,10 @@ export function createArenaView({ render, refreshSelfProfile }) {
       if (winDiff) return winDiff;
       const lossDiff = (a.simulation.lossRate || 0) - (b.simulation.lossRate || 0);
       if (lossDiff) return lossDiff;
+    }
+    if (!aReady && !bReady) {
+      const scoreDiff = arenaScore(a) - arenaScore(b);
+      if (scoreDiff) return scoreDiff;
     }
     return (a?.opponent?.rowIndex || a?.rowIndex || 0) - (b?.opponent?.rowIndex || b?.rowIndex || 0);
   }

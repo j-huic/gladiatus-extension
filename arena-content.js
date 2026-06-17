@@ -158,7 +158,7 @@
       clearArenaBadges();
       annotateResult(result);
       const status = document.querySelector(`#${PANEL_ID} .glad-arena-status`);
-      if (status) setPanelStatus(status, resultStatusText(result, "Cached"), false);
+      if (status) setPanelStatus(status, resultStatusText(result), false);
     }
 
     if (options.refresh !== false && !options.fromStorage) {
@@ -193,7 +193,7 @@
         clearArenaBadges();
         annotateResult(result);
         const status = document.querySelector(`#${PANEL_ID} .glad-arena-status`);
-        if (status) setPanelStatus(status, resultStatusText(result, result.arenaKind === "team" ? "Best" : "Best win"), false);
+        if (status) setPanelStatus(status, resultStatusText(result), false);
       })
       .catch((error) => {
         const status = document.querySelector(`#${PANEL_ID} .glad-arena-status`);
@@ -220,7 +220,7 @@
 
   function annotateRows(entries, opponents) {
     const scoreMode = isTeamScan(entries, opponents);
-    const best = scoreMode ? bestScoreResult(opponents) : bestSimulationResult(opponents);
+    const best = scoreMode ? bestScoreResult(opponents) : bestSimulationResult(opponents) || bestScoreResult(opponents);
     const resultIndex = indexOpponentResults(opponents);
 
     for (const entry of entries) {
@@ -247,9 +247,14 @@
       } else if (result.simulation?.ready) {
         badge.textContent = simulationWinLabel(result);
         badge.title = scoreTitle(result);
+      } else if (Number.isFinite(result.score)) {
+        badge.classList.add("glad-arena-score-warning");
+        badge.textContent = `Power ${ARENA.formatNumber(result.score)}`;
+        badge.title = scoreTitle(result);
+        if (result.matches === false) badge.classList.add("glad-arena-score-warning");
       } else {
         badge.classList.add(result.error ? "glad-arena-score-error" : "glad-arena-score-warning");
-        badge.textContent = "Win ?";
+        badge.textContent = "Power ?";
         badge.title = scoreTitle(result) || result.error || "Simulation unavailable.";
       }
 
@@ -449,24 +454,33 @@
       if (!result) throw new Error("Scan is already running. Wait for the current scan to finish.");
       await saveArenaResult(result);
 
-      setPanelStatus(status, resultStatusText(result, result.arenaKind === "team" ? "Best" : "Best win"), false);
+      setPanelStatus(status, resultStatusText(result), false);
     } finally {
       button.disabled = false;
       select.disabled = false;
     }
   }
 
-  function resultStatusText(result, prefix) {
+  function resultStatusText(result) {
     if (!result) return "Scan is already running";
     const failed = result.failedCount ? `, ${result.failedCount} failed` : "";
     if (result.arenaKind === "team") {
       return result.bestName
-        ? `${prefix}: ${result.bestName} (${ARENA.formatNumber(result.bestScore)})${failed}`
+        ? `Best: ${result.bestName} (${ARENA.formatNumber(result.bestScore)})${failed}`
         : `Scanned ${result.opponentCount}${failed}`;
     }
-    return result.bestName && Number.isFinite(result.bestWinRate)
-      ? `${prefix}: ${result.bestName} (${formatPercent(result.bestWinRate)})${failed}`
-      : `Scanned ${result.opponentCount}${failed}`;
+    if (!result.bestName) return `Scanned ${result.opponentCount}${failed}`;
+    const best = bestResultFromSummary(result);
+    return best?.simulation?.ready
+      ? `Best win: ${result.bestName} (${formatPercent(best.simulation.winRate)})${failed}`
+      : `Best power: ${result.bestName} (${ARENA.formatNumber(result.bestScore)})${failed}`;
+  }
+
+  function bestResultFromSummary(result) {
+    const opponents = result?.opponents || [];
+    return opponents.find((entry) => entry?.displayName === result.bestName)
+      || opponents.find((entry) => entry?.opponent?.name === result.bestName)
+      || null;
   }
 
   function setPanelStatus(status, text, isError) {
