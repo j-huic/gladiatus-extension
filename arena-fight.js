@@ -155,6 +155,35 @@
     return `${credentials.origin}${GAME_PATH}index.php?mod=reports&sh=${encodeURIComponent(credentials.sh)}`;
   }
 
+  // The fight response is eval'd JS. A rejected fight (e.g. cooldown) renders an
+  // error row instead of a report; surface that message rather than faking success.
+  function parseFightError(body) {
+    const text = String(body || "");
+    if (!/errorRow|errorText/.test(text)) return "";
+    const match = text.match(/errorText'\)\.innerHTML\s*=\s*'([\s\S]*?)';/);
+    const message = (match ? match[1] : "")
+      .replace(/<[^>]*>/g, " ")
+      .replace(/\\'/g, "'")
+      .replace(/\s+/g, " ")
+      .trim();
+    return message || "The game rejected the fight (you may be on cooldown).";
+  }
+
+  // A successful fight responds with a redirect to its own combat report
+  // (document.location.href='...showCombatReport...'); follow it to the result (pure).
+  function combatReportUrlFromResponse(body, credentials = readPageCredentials()) {
+    if (!credentials.origin) return "";
+    const match = String(body || "").match(/location\.href\s*=\s*(['"])([^'"]*showCombatReport[^'"]*)\1/i);
+    if (!match) return "";
+    try {
+      const url = new URL(match[2].replace(/&amp;/g, "&"), `${credentials.origin}${GAME_PATH}`);
+      if (credentials.sh && !url.searchParams.get("sh")) url.searchParams.set("sh", credentials.sh);
+      return url.href;
+    } catch {
+      return "";
+    }
+  }
+
   // --- Firing the fight (page environment) --------------------------------
 
   async function fight(target, credentials = readPageCredentials()) {
@@ -162,11 +191,16 @@
     const response = await fetch(url, options);
     if (!response.ok) throw new Error(`Fight request failed with HTTP ${response.status}.`);
     const body = await response.text();
+    const error = parseFightError(body);
+    if (error) throw new Error(error);
+
+    const listUrl = reportsUrl(credentials);
     return {
       ok: true,
       name: target.name,
       body,
-      reportsUrl: reportsUrl(credentials)
+      reportUrl: combatReportUrlFromResponse(body, credentials) || listUrl,
+      reportsUrl: listUrl
     };
   }
 
@@ -183,6 +217,8 @@
     buildFightRequest,
     readPageCredentials,
     reportsUrl,
+    parseFightError,
+    combatReportUrlFromResponse,
     fight,
     loadBestTarget
   };

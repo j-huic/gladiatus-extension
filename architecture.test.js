@@ -578,6 +578,7 @@ const { schema, score, model, core, arena, sim } = loadGlobals();
   assert.doesNotMatch(arenaStatusContentSource, /GLAD_ARENA_PASSIVE_CHECK|GLAD_ARENA_FORCE_SCAN|GLAD_ARENA_ENSURE_VISIBLE_SCAN/);
   assert.match(arenaStatusContentSource, /GladiatusArenaFight/);
   assert.match(arenaStatusContentSource, /glad-arena-fight-button/);
+  assert.match(arenaStatusContentSource, /outcome\.reportUrl/);
   const arenaFightSource = fs.readFileSync(path.join(rootDir, "arena-fight.js"), "utf8");
   assert.match(arenaFightSource, /root\.GladiatusArenaFight/);
   assert.match(arenaFightSource, /submod=doCombat/);
@@ -1774,6 +1775,26 @@ async function runBackgroundScannerTests() {
   assert.equal(built.options.headers["X-CSRF-Token"], "CSRF");
   assert.throws(() => fight.buildFightRequest(target, { origin: "https://x", sh: "ABC", csrfToken: "" }), /CSRF/);
   assert.throws(() => fight.buildFightRequest(target, { origin: "https://x", sh: "", csrfToken: "C" }), /secure hash/);
+
+  // parseFightError surfaces the game's rejection message (e.g. cooldown) instead of faking success.
+  const creds = { origin: "https://s47-en.gladiatus.gameforge.com", sh: "ABC", csrfToken: "C" };
+  const errorBody = "document.getElementById('errorRow').style.display = 'block';\n"
+    + "document.getElementById('errorText').innerHTML = 'You can only challenge an opponent every 15 <a href=\"x\">(Centurion)</a> minutes.';";
+  const message = fight.parseFightError(errorBody);
+  assert.ok(/You can only challenge an opponent every 15/.test(message));
+  assert.doesNotMatch(message, /<a /);
+  assert.equal(fight.parseFightError("setData('<div>report</div>');"), "");
+
+  // combatReportUrlFromResponse follows the success redirect to the exact report.
+  const successBody = "document.location.href='index.php?mod=reports&submod=showCombatReport&t=2&reportId=31964876&sh=ZZ';";
+  const reportUrl = fight.combatReportUrlFromResponse(successBody, creds);
+  assert.ok(reportUrl.includes("submod=showCombatReport"));
+  assert.ok(reportUrl.includes("reportId=31964876"));
+  assert.ok(reportUrl.includes("t=2"));
+  assert.ok(reportUrl.startsWith("https://s47-en.gladiatus.gameforge.com/game/index.php?"));
+  assert.ok(fight.combatReportUrlFromResponse("document.location.href='index.php?submod=showCombatReport&reportId=99';", creds).includes("sh=ABC"));
+  assert.equal(fight.combatReportUrlFromResponse("document.location.href='index.php?mod=overview';", creds), "");
+  assert.equal(fight.combatReportUrlFromResponse("no redirect here", creds), "");
 }
 
 async function runAsyncTests() {

@@ -218,9 +218,9 @@
     button.textContent = `Fighting ${target.name}…`;
 
     try {
-      await fightModule.fight(target);
-      button.textContent = `Fought ${target.name} ✓`;
-      button.classList.add("glad-arena-fight-button-done");
+      const outcome = await fightModule.fight(target);
+      button.textContent = `Fought ${target.name} ✓ — opening report…`;
+      root.location.href = outcome.reportUrl || outcome.reportsUrl;
     } catch (error) {
       button.disabled = false;
       button.classList.add("glad-arena-fight-button-error");

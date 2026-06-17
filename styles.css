@@ -299,11 +299,6 @@ tr.glad-arena-best > td {
   opacity: 0.85;
 }
 
-.glad-arena-fight-button-done {
-  border-color: #7f9654;
-  color: #aebf7e;
-}
-
 .glad-arena-fight-button-error {
   border-color: #9d3f32;
   color: #ffb4a8;
