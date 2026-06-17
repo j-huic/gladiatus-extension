@@ -6,6 +6,7 @@
   };
   const ARENA = window.GladiatusArenaCore;
   const SCANNER = window.GladiatusArenaScanner;
+  const devLogger = window.GladiatusLog ? window.GladiatusLog.createLogger("arena-content") : null;
 
   if (!ARENA || !SCANNER) {
     registerMissingArenaDependencyDiagnostic();
@@ -39,7 +40,8 @@
 
   function registerMissingArenaDependencyDiagnostic() {
     const error = "Arena content script dependency missing: arena-core.js or arena-scan.js. Reload the unpacked extension and refresh this arena tab.";
-    console.error(error);
+    if (devLogger) devLogger.error(error);
+    else console.error(error);
 
     if (typeof chrome === "undefined" || !chrome.runtime?.onMessage || window.__GladiatusArenaMissingDependencyListener) return;
 

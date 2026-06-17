@@ -516,7 +516,7 @@ const { schema, score, model, core, arena, sim } = loadGlobals();
   const isolatedEntries = manifest.content_scripts.filter((entry) => entry.world !== "MAIN");
 
   assert.equal(manifest.background.service_worker, "background.js");
-  assert.match(backgroundSource, /importScripts\("auction-schema\.js", "auction-core\.js", "score-model\.js", "arena-core\.js", "arena-sim\.js", "arena-background-scan\.js", "auction-background-scan\.js"\);/);
+  assert.match(backgroundSource, /importScripts\("log-core\.js", "log-buffer\.js", "log-setup\.js", "auction-schema\.js", "auction-core\.js", "score-model\.js", "arena-core\.js", "arena-sim\.js", "arena-background-scan\.js", "auction-background-scan\.js"\);/);
   assert.ok(backgroundSource.indexOf("auction-schema.js") < backgroundSource.indexOf("auction-core.js"));
   assert.ok(backgroundSource.indexOf("auction-core.js") < backgroundSource.indexOf("score-model.js"));
   assert.ok(backgroundSource.indexOf("score-model.js") < backgroundSource.indexOf("arena-core.js"));
@@ -527,13 +527,16 @@ const { schema, score, model, core, arena, sim } = loadGlobals();
   assert.ok(repairFiles.indexOf("\"arena-sim.js\"") < repairFiles.indexOf("\"arena-scan.js\""));
   assert.ok(repairFiles.indexOf("\"arena-scan.js\"") < repairFiles.indexOf("\"arena-passive-content.js\""));
   assert.ok(repairFiles.indexOf("\"arena-passive-content.js\"") < repairFiles.indexOf("\"arena-fight.js\""));
-  assert.ok(repairFiles.indexOf("\"arena-fight.js\"") < repairFiles.indexOf("\"arena-status-content.js\""));
+  assert.ok(repairFiles.indexOf("\"arena-fight.js\"") < repairFiles.indexOf("\"arena-header-button.js\""));
+  assert.ok(repairFiles.indexOf("\"arena-header-button.js\"") < repairFiles.indexOf("\"arena-status-content.js\""));
   assert.ok(repairFiles.indexOf("\"arena-status-content.js\"") < repairFiles.indexOf("\"arena-content.js\""));
   assert.equal(repairFiles.includes("arena-background-scan.js"), false);
   assert.equal(repairFiles.includes("auction-background-scan.js"), false);
   assert.deepEqual(mainEntry.js, ["auction-schema.js", "auction-core.js"]);
   assert.equal(isolatedEntries.length, 1);
   assert.deepEqual(isolatedEntries[0].js, [
+    "log-core.js",
+    "log-setup.js",
     "auction-schema.js",
     "score-model.js",
     "auction-model.js",
@@ -543,6 +546,7 @@ const { schema, score, model, core, arena, sim } = loadGlobals();
     "arena-scan.js",
     "arena-passive-content.js",
     "arena-fight.js",
+    "arena-header-button.js",
     "arena-status-content.js",
     "auction-content.js",
     "arena-content.js"
@@ -550,7 +554,8 @@ const { schema, score, model, core, arena, sim } = loadGlobals();
   assert.ok(isolatedEntries[0].js.indexOf("arena-sim.js") < isolatedEntries[0].js.indexOf("arena-scan.js"));
   assert.ok(isolatedEntries[0].js.indexOf("arena-scan.js") < isolatedEntries[0].js.indexOf("arena-passive-content.js"));
   assert.ok(isolatedEntries[0].js.indexOf("arena-passive-content.js") < isolatedEntries[0].js.indexOf("arena-fight.js"));
-  assert.ok(isolatedEntries[0].js.indexOf("arena-fight.js") < isolatedEntries[0].js.indexOf("arena-status-content.js"));
+  assert.ok(isolatedEntries[0].js.indexOf("arena-fight.js") < isolatedEntries[0].js.indexOf("arena-header-button.js"));
+  assert.ok(isolatedEntries[0].js.indexOf("arena-header-button.js") < isolatedEntries[0].js.indexOf("arena-status-content.js"));
   assert.ok(isolatedEntries[0].js.indexOf("arena-status-content.js") < isolatedEntries[0].js.indexOf("arena-content.js"));
   assert.match(arenaScanSource, /GLAD_ARENA_REFRESH_SELF_PROFILE/);
   assert.match(backgroundSource, /GLAD_ARENA_REFRESH_SELF_PROFILE/);
@@ -587,6 +592,12 @@ const { schema, score, model, core, arena, sim } = loadGlobals();
   assert.match(arenaFightSource, /X-CSRF-Token/);
   // The fight module must stay UI-agnostic so the button can be relocated freely.
   assert.doesNotMatch(arenaFightSource, /glad-arena-passive-status|glad-arena-fight-button|createElement|document\.body/);
+  const arenaHeaderButtonSource = fs.readFileSync(path.join(rootDir, "arena-header-button.js"), "utf8");
+  assert.match(arenaHeaderButtonSource, /glad-arena-header-button/);
+  assert.match(arenaHeaderButtonSource, /arenaPlace/);
+  assert.match(arenaHeaderButtonSource, /grouparenaPlace/);
+  assert.match(arenaHeaderButtonSource, /GladiatusArenaFight/);
+  assert.match(arenaHeaderButtonSource, /loadBestTarget/);
   const arenaContentSource = fs.readFileSync(path.join(rootDir, "arena-content.js"), "utf8");
   assert.match(arenaContentSource, /__GladiatusArenaContentBootstrapped/);
   assert.match(arenaContentSource, /GLAD_ARENA_BOOT_V2/);
@@ -605,7 +616,8 @@ const { schema, score, model, core, arena, sim } = loadGlobals();
   assert.match(popupRuntimeSource, /ensureAuctionContentScript\(tab\.id\);\s+return sendTabMessage\(tab\.id, message\);/);
   assert.ok(popupRuntimeSource.indexOf("\"arena-scan.js\"") < popupRuntimeSource.indexOf("\"arena-passive-content.js\""));
   assert.ok(popupRuntimeSource.indexOf("\"arena-passive-content.js\"") < popupRuntimeSource.indexOf("\"arena-fight.js\""));
-  assert.ok(popupRuntimeSource.indexOf("\"arena-fight.js\"") < popupRuntimeSource.indexOf("\"arena-status-content.js\""));
+  assert.ok(popupRuntimeSource.indexOf("\"arena-fight.js\"") < popupRuntimeSource.indexOf("\"arena-header-button.js\""));
+  assert.ok(popupRuntimeSource.indexOf("\"arena-header-button.js\"") < popupRuntimeSource.indexOf("\"arena-status-content.js\""));
   assert.ok(popupRuntimeSource.indexOf("\"arena-status-content.js\"") < popupRuntimeSource.indexOf("\"arena-content.js\""));
   assert.equal(fs.existsSync(path.join(rootDir, "content.js")), false);
 

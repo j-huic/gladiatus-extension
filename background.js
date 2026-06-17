@@ -1,6 +1,11 @@
-importScripts("auction-schema.js", "auction-core.js", "score-model.js", "arena-core.js", "arena-sim.js", "arena-background-scan.js", "auction-background-scan.js");
+importScripts("log-core.js", "log-buffer.js", "log-setup.js", "auction-schema.js", "auction-core.js", "score-model.js", "arena-core.js", "arena-sim.js", "arena-background-scan.js", "auction-background-scan.js");
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  if (message?.type === "GLAD_DEV_LOG") {
+    if (message.record && self.GladiatusLogBuffer) self.GladiatusLogBuffer.append(message.record);
+    return false;
+  }
+
   if (message?.type === "GLAD_AUCTION_FORCE_SCAN") {
     log("manual auction scan requested", { url: safeUrl(message.request?.sourceUrl) });
     auctionScanner().forceScan(message.request)
@@ -133,6 +138,7 @@ const AUCTION_CONTENT_FILES = [
   "arena-scan.js",
   "arena-passive-content.js",
   "arena-fight.js",
+  "arena-header-button.js",
   "arena-status-content.js",
   "auction-content.js",
   "arena-content.js"
@@ -164,8 +170,11 @@ function auctionScanner() {
   return self.GladiatusAuctionBackgroundScanner;
 }
 
+const devLogger = self.GladiatusLog ? self.GladiatusLog.createLogger("background") : null;
+
 function log(message, details = {}) {
-  console.log(LOG_PREFIX, message, details);
+  if (devLogger) devLogger.debug(message, details);
+  else console.log(LOG_PREFIX, message, details);
 }
 
 function safeUrl(value) {

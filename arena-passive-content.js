@@ -1,6 +1,7 @@
 (() => {
   const root = typeof globalThis !== "undefined" ? globalThis : window;
   const ARENA = root.GladiatusArenaCore;
+  const devLogger = root.GladiatusLog ? root.GladiatusLog.createLogger("arena-passive") : null;
 
   if (!ARENA || typeof chrome === "undefined" || !chrome.runtime?.sendMessage) return;
 
@@ -91,7 +92,8 @@
       preferredKind,
       onlyPreferred: Boolean(preferredKind)
     }).catch((error) => {
-      console.warn("After-fight arena scan trigger failed.", error);
+      if (devLogger) devLogger.warn("after-fight arena scan trigger failed", { error: String(error?.message || error) });
+      else console.warn("After-fight arena scan trigger failed.", error);
     });
   }
 
@@ -165,7 +167,8 @@
       preferredKind,
       onlyPreferred: Boolean(preferredKind)
     }).catch((error) => {
-      console.warn("Fight-click arena scan trigger failed.", error);
+      if (devLogger) devLogger.warn("fight-click arena scan trigger failed", { error: String(error?.message || error) });
+      else console.warn("Fight-click arena scan trigger failed.", error);
     });
   }
 

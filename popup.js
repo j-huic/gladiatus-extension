@@ -1,5 +1,6 @@
 import { createArenaView } from "./popup/arena-view.js";
 import { createAuctionView } from "./popup/auction-view.js";
+import { createDevLogView } from "./popup/dev-log-view.js";
 import {
   ARENA,
   AUCTION_CONTENT_MESSAGES,
@@ -35,6 +36,7 @@ import {
 
 const auctionView = createAuctionView({ render, applyCurrentSortToPage });
 const arenaView = createArenaView({ render, refreshSelfProfile });
+createDevLogView({ setStatus });
 
 nodes.scanButton.addEventListener("click", onScanButtonClick);
 nodes.pageTabs.addEventListener("click", onPageTabClick);

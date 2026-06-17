@@ -55,6 +55,20 @@ button:disabled {
   padding: 8px 12px;
 }
 
+.dev-log {
+  border-top: 1px solid #332416;
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  padding: 8px 12px;
+}
+
+.dev-log button {
+  background: #2c2014;
+  font-weight: 400;
+  min-height: 24px;
+}
+
 #summary {
   background: #20170f;
   border-bottom: 1px solid #332416;

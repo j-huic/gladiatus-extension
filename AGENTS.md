@@ -37,6 +37,7 @@ This repo is a local Chrome MV3 extension for improving Gladiatus auction and ar
 - `background.js` owns cross-origin Gladiatus profile HTML fetches for arena scans. It should stay a narrow fetch bridge, not a parser.
 - `styles.css` is only for injected page UI.
 - `manifest.json` loads `auction-schema.js` and `auction-core.js` in the MAIN world, then loads one deterministic isolated content-script entry with shared dependencies followed by auction (`auction-content.js`) and arena (`arena-content.js`) bootstraps. Both bootstraps match Gladiatus game pages and gate themselves by `mod`.
+- Dev logging is a four-module layer for capturing structured logs to a file Claude can read. `log-core.js` (`GladiatusLog`) is the facade: levels, `createLogger(source)`, pluggable sinks, `sh=` redaction, NDJSON serialize. `log-buffer.js` (`GladiatusLogBuffer`) is a ring buffer over `chrome.storage.session` (the single writer lives in the background). `log-drain.js` (`GladiatusLogDrain`, popup-only) reads the buffer and downloads `~/Downloads/gladiatus-dev-log.ndjson` — it depends only on the buffer + an injected serialize, never on the logger. `log-setup.js` wires sinks per context (auto-installs on load). `popup/dev-log-view.js` is the two-button popup UI. To debug: reproduce, click **Download debug log**, read the file. Logging is verbose to the file (debug+) but quiet in the console (warn+).
 
 ## Design Principles
 
@@ -52,8 +53,9 @@ This repo is a local Chrome MV3 extension for improving Gladiatus auction and ar
 Run these after changes:
 
 ```sh
-for file in auction-schema.js score-model.js auction-core.js auction-model.js auction-content.js arena-core.js arena-content.js background.js popup.js popup/*.js architecture.test.js; do node --check "$file"; done
+for file in auction-schema.js score-model.js auction-core.js auction-model.js auction-content.js arena-core.js arena-content.js background.js popup.js popup/*.js architecture.test.js log-core.js log-buffer.js log-drain.js log-setup.js log.test.js; do node --check "$file"; done
 node architecture.test.js
+node log.test.js
 node -e "JSON.parse(require('fs').readFileSync('manifest.json','utf8')); console.log('manifest ok')"
 git diff --check
 ```

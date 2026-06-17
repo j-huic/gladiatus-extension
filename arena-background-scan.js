@@ -15,9 +15,6 @@
   const SCAN_CONCURRENCY = 2;
   const RETRYABLE_PROFILE_STATUSES = new Set([429, 500, 502, 503, 504]);
   const LOG_PREFIX = "[Gladiatus Background Scanner]";
-  // Flip to true for verbose per-step scan logging. Off by default keeps the
-  // console to a single "Scanning: A, B, C" line per scan.
-  const VERBOSE_LOGGING = false;
   const KINDS = ["team", "single"];
   const KIND_LABELS = {
     single: "Arena",
@@ -1386,12 +1383,15 @@
     return new Promise((resolve) => setTimeout(resolve, milliseconds));
   }
 
+  const devLogger = root.GladiatusLog ? root.GladiatusLog.createLogger("arena-bg") : null;
+
   function log(message, details = {}) {
-    if (VERBOSE_LOGGING) console.log(LOG_PREFIX, message, details);
+    if (devLogger) devLogger.debug(message, details);
   }
 
   function warn(message, details = {}) {
-    console.warn(LOG_PREFIX, message, details);
+    if (devLogger) devLogger.warn(message, details);
+    else console.warn(LOG_PREFIX, message, details);
   }
 
   function safeUrl(value) {

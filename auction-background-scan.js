@@ -214,8 +214,11 @@
     return new Promise((resolve) => setTimeout(resolve, milliseconds));
   }
 
+  const devLogger = root.GladiatusLog ? root.GladiatusLog.createLogger("auction-bg") : null;
+
   function log(message, details = {}) {
-    console.log(LOG_PREFIX, message, details);
+    if (devLogger) devLogger.debug(message, details);
+    else console.log(LOG_PREFIX, message, details);
   }
 
   function safeUrl(value) {
