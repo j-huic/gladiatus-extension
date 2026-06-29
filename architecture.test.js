@@ -532,7 +532,7 @@ const { schema, score, model, core, arena, sim } = loadGlobals();
   assert.ok(repairFiles.indexOf("\"arena-status-content.js\"") < repairFiles.indexOf("\"arena-content.js\""));
   assert.equal(repairFiles.includes("arena-background-scan.js"), false);
   assert.equal(repairFiles.includes("auction-background-scan.js"), false);
-  assert.deepEqual(mainEntry.js, ["auction-schema.js", "auction-core.js"]);
+  assert.deepEqual(mainEntry.js, ["auction-schema.js", "auction-core.js", "guild-market-core.js"]);
   assert.equal(isolatedEntries.length, 1);
   assert.deepEqual(isolatedEntries[0].js, [
     "log-core.js",
@@ -644,6 +644,115 @@ const { schema, score, model, core, arena, sim } = loadGlobals();
   assert.match(popupHtml, /<script\s+src="auction-core\.js"><\/script>/);
   assert.match(popupHtml, /<script\s+src="arena-sim\.js"><\/script>/);
   assert.match(popupHtml, /<script\s+type="module"\s+src="popup\.js"><\/script>/);
+}
+
+{
+  // Guild market auto-pricing: flat 100k per unit, stacks only, wrapping marketDrop,
+  // plus a re-assert guard that defeats a late overwrite from another extension.
+  const preisField = { value: "" };
+  const sellidField = { value: "" };
+  let activeElement = null;
+  const doc = {
+    location: { href: "https://s47-en.gladiatus.gameforge.com/game/index.php?mod=guildMarket&sh=abc" },
+    get activeElement() {
+      return activeElement;
+    },
+    getElementById(id) {
+      return id === "preis" ? preisField : null;
+    },
+    querySelector(selector) {
+      return selector === "#sellForm [name=\"sellid\"]" ? sellidField : null;
+    }
+  };
+  let calcDuesCalls = 0;
+  let originalDropCalls = 0;
+  let guardTick = null;
+  let clearedTimers = 0;
+  const context = {
+    console,
+    URL,
+    document: doc,
+    location: doc.location,
+    marketDrop() {
+      originalDropCalls += 1;
+      sellidField.value = "ITEM-1";
+      preisField.value = "DEFAULT"; // stands in for the game's average/gold price
+    },
+    calcDues() {
+      calcDuesCalls += 1;
+    },
+    setInterval(callback) {
+      guardTick = callback; // capture the guard's tick so the test can drive it
+      return 1;
+    },
+    clearInterval() {
+      clearedTimers += 1;
+    }
+  };
+  context.window = context;
+  context.globalThis = context;
+  vm.createContext(context);
+  vm.runInContext(fs.readFileSync(path.join(rootDir, "guild-market-core.js"), "utf8"), context, { filename: "guild-market-core.js" });
+
+  const guildMarket = context.GladiatusGuildMarket;
+  assert.equal(guildMarket.version, "guild-market-core-v1");
+  assert.equal(guildMarket.ratePerItem, 100000);
+  assert.equal(guildMarket.priceForStack(20), 2000000);
+  assert.equal(guildMarket.priceForStack("5"), 500000);
+  assert.equal(guildMarket.priceForStack(1), null);
+  assert.equal(guildMarket.priceForStack(0), null);
+  assert.equal(guildMarket.priceForStack("nope"), null);
+  assert.equal(guildMarket.isGuildMarketUrl(doc.location.href), true);
+  assert.equal(guildMarket.isGuildMarketUrl("https://s47-en.gladiatus.gameforge.com/game/index.php?mod=auction"), false);
+
+  // Auto-installed on the guild market URL: marketDrop is now wrapped.
+  assert.equal(context.marketDrop.__gladiatusAutoPrice, true);
+
+  // Stack of 20 -> game default runs first, then price is forced to 20 * 100000, fees refresh, guard armed.
+  context.marketDrop({}, 20);
+  assert.equal(originalDropCalls, 1);
+  assert.equal(preisField.value, "2000000");
+  assert.equal(calcDuesCalls, 1);
+  assert.equal(typeof guardTick, "function");
+
+  // Another extension clobbers our price ~100ms later -> the guard restores it on the next tick.
+  preisField.value = "6466";
+  guardTick();
+  assert.equal(preisField.value, "2000000");
+  assert.equal(calcDuesCalls, 2);
+
+  // A tick with nothing to fix is a no-op.
+  guardTick();
+  assert.equal(calcDuesCalls, 2);
+
+  // While the user is editing the price field, the guard must not fight them.
+  activeElement = preisField;
+  preisField.value = "12345";
+  guardTick();
+  assert.equal(preisField.value, "12345");
+  assert.equal(calcDuesCalls, 2);
+  activeElement = null;
+
+  // If a different item (or none) is now staged, the guard stops re-asserting the old price.
+  sellidField.value = "ITEM-2";
+  preisField.value = "777";
+  guardTick();
+  assert.equal(preisField.value, "777");
+
+  // The guard clears itself once its window elapses.
+  const clearedBefore = clearedTimers;
+  const ticks = Math.ceil(guildMarket.guardDurationMs / guildMarket.guardIntervalMs) + 1;
+  for (let i = 0; i < ticks; i += 1) guardTick();
+  assert.ok(clearedTimers > clearedBefore);
+
+  // Single item (amount 1) -> wrapper leaves the game default untouched and arms no guard.
+  sellidField.value = "";
+  preisField.value = "DEFAULT";
+  const guardTickBefore = guardTick;
+  context.marketDrop({}, 1);
+  assert.equal(originalDropCalls, 2);
+  assert.equal(preisField.value, "DEFAULT");
+  assert.equal(guardTick, guardTickBefore); // setInterval was not called again
 }
 
 {
