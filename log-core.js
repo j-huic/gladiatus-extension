@@ -10,8 +10,22 @@
 
   const LEVELS = { trace: 10, debug: 20, info: 30, warn: 40, error: 50 };
   const DEFAULT_LEVEL = "debug";
-  // The session hash (`sh`) is a credential. Never let it reach a sink.
-  const SH_PATTERN = /([?&]sh=)[^&#\s"']+/g;
+  // Authentication/session query parameters are credentials. Never let them
+  // reach a sink, even when capitalization differs or the URL is malformed.
+  const CREDENTIAL_PATTERN = /([?&](?:sh|csrf_token|token|auth|session)=)[^&#\s"']+/gi;
+  const CREDENTIAL_FIELD_KEYS = new Set([
+    "sh",
+    "csrftoken",
+    "token",
+    "authtoken",
+    "accesstoken",
+    "refreshtoken",
+    "auth",
+    "authorization",
+    "session",
+    "sessionid"
+  ]);
+  const MAX_REDACTION_DEPTH = 6;
 
   let seq = 0;
   const sinks = [];
@@ -41,16 +55,28 @@
   }
 
   function redactString(value) {
-    return value.replace(SH_PATTERN, "$1[redacted]");
+    try {
+      const sanitizeText = root.GladiatusHelperSecurity?.sanitizeText;
+      if (typeof sanitizeText === "function") return sanitizeText(value);
+    } catch (_error) {
+      // Keep the logger safe and usable if a shared sanitizer ever fails.
+    }
+    return value.replace(CREDENTIAL_PATTERN, "$1[redacted]");
+  }
+
+  function isCredentialField(key) {
+    const normalized = String(key || "").toLowerCase().replace(/[^a-z0-9]+/g, "");
+    return CREDENTIAL_FIELD_KEYS.has(normalized);
   }
 
   function redactValue(value, depth) {
     if (typeof value === "string") return redactString(value);
-    if (!value || typeof value !== "object" || depth > 6) return value;
+    if (!value || typeof value !== "object") return value;
+    if (depth > MAX_REDACTION_DEPTH) return "[max-depth]";
     if (Array.isArray(value)) return value.map((item) => redactValue(item, depth + 1));
     const out = {};
     for (const key of Object.keys(value)) {
-      out[key] = key === "sh" ? "[redacted]" : redactValue(value[key], depth + 1);
+      out[key] = isCredentialField(key) ? "[redacted]" : redactValue(value[key], depth + 1);
     }
     return out;
   }

@@ -2,11 +2,10 @@
 // the one place to change to alter the whole logging approach (levels, where
 // records go) without touching call sites, the buffer, or the drain.
 //
-// - background: console (quiet, warn+) + buffer (verbose, debug+). The
-//   background owns the SINGLE storage writer.
-// - content / popup: console + forward to the background. The popup reads the
-//   buffer directly for the drain, but routes its own log output through the
-//   background so only one context ever writes storage.
+// - every context always has a quiet console sink (warn+);
+// - only while Diagnostics is enabled, background adds the verbose buffer and
+//   content/popup contexts forward records to that single storage writer.
+// The popup reads the buffer directly for explicit user-generated export.
 //
 // Installs automatically for the detected context at load, and also exposes
 // GladiatusLog.installFor(context, options) for explicit/overriding wiring.
@@ -43,12 +42,13 @@
   function installFor(context, options = {}) {
     const consoleMinLevel = options.consoleMinLevel || "warn";
     const bufferMinLevel = options.bufferMinLevel || "debug";
+    const diagnosticsEnabled = options.diagnosticsEnabled === true;
     const sinks = [LOG.consoleSink({ minLevel: consoleMinLevel })];
 
-    if (context === "background") {
+    if (diagnosticsEnabled && context === "background") {
       const buffer = options.buffer || root.GladiatusLogBuffer;
       if (buffer) sinks.push(LOG.bufferSink(buffer, { minLevel: bufferMinLevel }));
-    } else {
+    } else if (diagnosticsEnabled) {
       // content + popup forward to the background, the single buffer writer.
       const send = options.send || defaultSend;
       sinks.push(LOG.forwardSink(send, { minLevel: bufferMinLevel }));
@@ -62,5 +62,19 @@
   LOG.detectContext = detectContext;
   LOG.DEV_LOG_MESSAGE = DEV_LOG_MESSAGE;
 
-  installFor(detectContext());
+  const context = detectContext();
+  installFor(context, { diagnosticsEnabled: false });
+
+  const settings = root.GladiatusFeatureSettings;
+  // The service worker owns its startup migration ordering and calls
+  // installFor explicitly from background.js. Other contexts can hydrate and
+  // subscribe here without racing installation migration.
+  if (context !== "background" && settings?.get) {
+    settings.get()
+      .then((value) => installFor(context, { diagnosticsEnabled: Boolean(value?.diagnostics?.enabled) }))
+      .catch(() => {});
+    settings.subscribe?.((value) => {
+      installFor(context, { diagnosticsEnabled: Boolean(value?.diagnostics?.enabled) });
+    });
+  }
 })();
