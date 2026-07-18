@@ -1,0 +1,28 @@
+{
+  "glad-arena-self-profile-v1": {
+    "scannedAt": "2026-06-29T12:00:00.000Z",
+    "profileUrl": "",
+    "character": {
+      "name": "Testus Maximus",
+      "level": 42,
+      "stats": {
+        "level": 42,
+        "strength": 100,
+        "dexterity": 80,
+        "agility": 60,
+        "constitution": 120,
+        "charisma": 40,
+        "intelligence": 50,
+        "armour": 150,
+        "armourAbsorbMin": 10,
+        "armourAbsorbMax": 20,
+        "lifeMax": 3000,
+        "damageMin": 200,
+        "damageMax": 300,
+        "blockChance": 8,
+        "critChance": 12,
+        "critAvoidChance": 5
+      }
+    }
+  }
+}

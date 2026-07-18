@@ -1,7 +1,7 @@
 (() => {
   const root = typeof globalThis !== "undefined" ? globalThis : window;
   const pageDocument = root.document || null;
-  const CORE_VERSION = "auction-core-v3";
+  const CORE_VERSION = "auction-core-v4";
   const PAGE_BRIDGE_REQUEST_SOURCE = "glad-ah-extension-v3";
   const PAGE_BRIDGE_RESPONSE_SOURCE = "glad-ah-page-v3";
   const SCHEMA = root.GladiatusAuctionSchema;
@@ -102,17 +102,34 @@
   }
 
   function parseTooltipLinesFromValue(raw, doc = pageDocument) {
+    return parseItemTooltipFromValue(raw)
+      .map((entry) => stripHtml(Array.isArray(entry) ? entry[0] : entry, doc))
+      .filter(Boolean);
+  }
+
+  function parseItemTooltipFromValue(raw) {
     if (!raw) return [];
 
     try {
       const tooltip = JSON.parse(raw);
-      const itemLines = Array.isArray(tooltip) && Array.isArray(tooltip[0]) ? tooltip[0] : [];
-      return itemLines
-        .map((entry) => stripHtml(Array.isArray(entry) ? entry[0] : entry, doc))
-        .filter(Boolean);
+      return Array.isArray(tooltip) && Array.isArray(tooltip[0]) ? tooltip[0] : [];
     } catch {
       return [];
     }
+  }
+
+  function qualityInfo(value, titleStyle = "") {
+    const tiers = {
+      "0": { id: "0", name: "ceres", label: "Ceres", color: "green" },
+      "1": { id: "1", name: "neptune", label: "Neptune", color: "blue" },
+      "2": { id: "2", name: "mars", label: "Mars", color: "purple" }
+    };
+    const tier = tiers[String(value ?? "")] || { id: "-1", name: "standard", label: "Standard", color: "" };
+
+    return {
+      ...tier,
+      titleStyle: String(titleStyle || "")
+    };
   }
 
   function parseStats(lines) {
@@ -558,13 +575,52 @@
     };
   }
 
+  function readItemDataAttributesFromElement(icon) {
+    const attributes = {};
+    for (const attribute of Array.from(icon?.attributes || [])) {
+      if (!attribute.name.startsWith("data-") || attribute.name === "data-tooltip" || attribute.name === "data-comparison-tooltip") continue;
+      attributes[attribute.name] = attribute.value;
+    }
+    return attributes;
+  }
+
+  function readItemDataAttributesFromHtml(iconTag) {
+    const attributes = {};
+    const pattern = /\s(data-[\w:-]+)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/gi;
+    for (const match of String(iconTag || "").matchAll(pattern)) {
+      const name = match[1].toLowerCase();
+      if (name === "data-tooltip" || name === "data-comparison-tooltip") continue;
+      attributes[name] = decodeHtml(match[2] ?? match[3] ?? match[4] ?? "");
+    }
+    return attributes;
+  }
+
+  function buildItemSource({ iconClass = "", iconStyle = "", dataAttributes = {}, tooltipRaw = "" } = {}) {
+    return {
+      icon: {
+        className: String(iconClass || ""),
+        style: String(iconStyle || ""),
+        dataAttributes,
+        // The first tooltip group is the auction item itself. Later groups compare it
+        // with the viewer's equipped item, so retaining them would duplicate unrelated
+        // character data for every listing and inflate chrome.storage.local.
+        tooltip: parseItemTooltipFromValue(tooltipRaw)
+      }
+    };
+  }
+
   function parseAuctionItemFromForm(form, index = 0, meta = {}) {
     const icon = form.querySelector("[data-tooltip]");
     if (!icon) return null;
 
     const itemMeta = normalizeItemMeta(meta);
-    const lines = parseTooltipLines(icon, form.ownerDocument || icon.ownerDocument || pageDocument);
+    const tooltipRaw = icon.dataset?.tooltip || icon.getAttribute("data-tooltip") || "";
+    const itemTooltip = parseItemTooltipFromValue(tooltipRaw);
+    const lines = parseTooltipLinesFromValue(tooltipRaw, form.ownerDocument || icon.ownerDocument || pageDocument);
     const parsed = parseStats(lines);
+    const titleStyle = Array.isArray(itemTooltip[0]) ? itemTooltip[0][1] : "";
+    const quality = qualityInfo(icon.getAttribute("data-quality"), titleStyle);
+    const imageStyle = icon.getAttribute("style") || "";
 
     return {
       auctionId: getAuctionId(form, index),
@@ -581,7 +637,14 @@
       basis: icon.getAttribute("data-basis") || "",
       itemClass: icon.className || "",
       imageSrc: readIconImageSrc(icon),
-      imageStyle: icon.getAttribute("style") || "",
+      imageStyle,
+      quality,
+      source: buildItemSource({
+        iconClass: icon.className,
+        iconStyle: imageStyle,
+        dataAttributes: readItemDataAttributesFromElement(icon),
+        tooltipRaw
+      }),
       lines,
       parserVersion: CORE_VERSION,
       level: parsed.level,
@@ -607,8 +670,13 @@
     if (!iconTag) return null;
 
     const itemMeta = normalizeItemMeta(meta);
-    const lines = parseTooltipLinesFromValue(readHtmlAttribute(iconTag, "data-tooltip"));
+    const tooltipRaw = readHtmlAttribute(iconTag, "data-tooltip");
+    const itemTooltip = parseItemTooltipFromValue(tooltipRaw);
+    const lines = parseTooltipLinesFromValue(tooltipRaw);
     const parsed = parseStats(lines);
+    const titleStyle = Array.isArray(itemTooltip[0]) ? itemTooltip[0][1] : "";
+    const quality = qualityInfo(readHtmlAttribute(iconTag, "data-quality"), titleStyle);
+    const imageStyle = readHtmlAttribute(iconTag, "style");
 
     return {
       auctionId: readInputValueFromHtml(formHtml, "auctionid") || String(index),
@@ -625,7 +693,14 @@
       basis: readHtmlAttribute(iconTag, "data-basis"),
       itemClass: readHtmlAttribute(iconTag, "class"),
       imageSrc: readIconImageSrcFromHtml(formHtml),
-      imageStyle: readHtmlAttribute(iconTag, "style"),
+      imageStyle,
+      quality,
+      source: buildItemSource({
+        iconClass: readHtmlAttribute(iconTag, "class"),
+        iconStyle: imageStyle,
+        dataAttributes: readItemDataAttributesFromHtml(iconTag),
+        tooltipRaw
+      }),
       lines,
       parserVersion: CORE_VERSION,
       level: parsed.level,
@@ -775,6 +850,8 @@
     parseDamageRange,
     parseTooltipLines,
     parseTooltipLinesFromValue,
+    parseItemTooltipFromValue,
+    qualityInfo,
     parseStats,
     normalizeItemMeta,
     parseAuctionItemFromForm,

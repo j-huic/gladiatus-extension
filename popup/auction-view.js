@@ -233,6 +233,7 @@ export function createAuctionView({ render, applyCurrentSortToPage }) {
 
     const name = document.createElement("div");
     name.className = "item-name";
+    if (item.quality?.color) name.classList.add(`item-quality-${item.quality.color}`);
     name.textContent = item.name || "Unknown item";
 
     const scoreNode = document.createElement("div");
@@ -243,6 +244,7 @@ export function createAuctionView({ render, applyCurrentSortToPage }) {
     meta.className = "meta";
     meta.textContent = [
       item.category,
+      item.quality?.color ? `${item.quality.label} (${item.quality.color})` : "",
       item.level ? `Level ${item.level}` : "",
       item.itemValue ? `Value ${item.itemValue}` : "",
       MODEL.priceLabel(item),

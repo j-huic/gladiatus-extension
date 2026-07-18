@@ -34,7 +34,7 @@ It does not bid, buy, attack, call non-game APIs, or send data anywhere. The pop
 - Armor has a configurable `Min bonus damage` filter. It defaults to `0`, so it only filters once raised.
 - Armor main-character score is `agility + dexterity + ((damage bonus + strength / 10) * 8)`.
 - Sorting affects only the currently visible auction page.
-- Use the game filter first for item type, level, and quality, then sort the visible results by Strength, Dexterity, Agility, Constitution, Charisma, Intelligence, Life points, Health, Armour, Damage bonus, weapon damage, Block value, Healing, Threat, and related values.
+- Use the game filter first for item type, level, and quality, then sort the visible results by Strength, Dexterity, Agility, Constitution, Charisma, Intelligence, Life points, Health, Armour, Damage bonus, weapon damage, Block value, Healing, and related values.
 - `High first` is the default for stats. `Immediate gold` defaults to low first.
 - The selected sort stat and sort direction are persisted across auction filter reloads.
 - If you change files while the extension is already loaded, click the extension reload button on `chrome://extensions`, then refresh the Gladiatus page.

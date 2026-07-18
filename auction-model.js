@@ -56,6 +56,7 @@
         defineScorePreset({ id: "avgDamage", label: "Average damage", score: (item) => stat(item, "damageAvg") }),
         defineScorePreset({ id: "maxDamage", label: "Max damage", score: (item) => stat(item, "damageMax") }),
         defineScorePreset({ id: "damageValue", label: "Damage / gold", score: (item) => safeDivide(stat(item, "damageAvg"), price(item)) }),
+        defineQualityPreset(),
         defineResaleValuePreset()
       ]
     }),
@@ -66,10 +67,9 @@
       accepts: (item) => acceptsView("armor", item),
       presets: [
         defineScorePreset({ id: "main", label: "Main: Agi/Dex + dmg x8", score: mainCharacterScore }),
-        defineScorePreset({ id: "tank", label: "Tank utility", score: tankScore }),
         defineScorePreset({ id: "healing", label: "Healing", score: (item) => stat(item, "healing") }),
         defineScorePreset({ id: "block", label: "Block", score: (item) => stat(item, "blockvalue") }),
-        defineScorePreset({ id: "threat", label: "Threat", score: (item) => stat(item, "threat") }),
+        defineQualityPreset(),
         defineResaleValuePreset()
       ],
       filters: [
@@ -89,6 +89,7 @@
         defineScorePreset({ id: "efficiency", label: "Health / gold", score: (item) => safeDivide(stat(item, "foodHealing"), price(item)) }),
         defineScorePreset({ id: "healing", label: "Total healing", score: (item) => stat(item, "foodHealing") }),
         defineScorePreset({ id: "cheap", label: "Cheapest", score: (item) => -price(item), display: (item) => `Price: ${formatNumber(price(item))}` }),
+        defineQualityPreset(),
         defineResaleValuePreset()
       ]
     }),
@@ -102,6 +103,7 @@
         defineScorePreset({ id: "agility", label: "Agility", score: (item) => stat(item, "agility") }),
         defineScorePreset({ id: "dexterity", label: "Dexterity", score: (item) => stat(item, "dexterity") }),
         defineScorePreset({ id: "strength", label: "Strength", score: (item) => stat(item, "strength") }),
+        defineQualityPreset(),
         defineResaleValuePreset()
       ]
     }),
@@ -113,6 +115,7 @@
       presets: [
         defineScorePreset({ id: "agility", label: "Agility", score: (item) => stat(item, "agility") }),
         defineScorePreset({ id: "dexStrength", label: "Dexterity + strength", score: (item) => stat(item, "dexterity") + stat(item, "strength") }),
+        defineQualityPreset(),
         defineResaleValuePreset()
       ]
     })
@@ -339,10 +342,6 @@
     return stat(item, "agility") + stat(item, "dexterity") + damageEquivalent * MAIN_DAMAGE_WEIGHT;
   }
 
-  function tankScore(item) {
-    return stat(item, "healing") + stat(item, "blockvalue") + stat(item, "hardeningvalue") + stat(item, "threat");
-  }
-
   function defineResaleValuePreset() {
     return defineScorePreset({
       id: "resaleValue",
@@ -350,6 +349,32 @@
       score: resaleValueScore,
       display: (_item, score) => `Value / bid: ${formatNumber(score)}`
     });
+  }
+
+  function defineQualityPreset() {
+    return defineScorePreset({
+      id: "quality",
+      label: "Quality",
+      score: qualityRank,
+      display: (item) => `Quality: ${qualityLabel(item)}`
+    });
+  }
+
+  function qualityRank(item) {
+    const id = String(item?.quality?.id ?? item?.source?.icon?.dataAttributes?.["data-quality"] ?? "-1");
+    return { "2": 3, "1": 2, "0": 1 }[id] || 0;
+  }
+
+  function qualityLabel(item) {
+    const quality = item?.quality;
+    if (quality?.label) return quality.color ? `${quality.label} (${quality.color})` : quality.label;
+
+    const id = String(item?.source?.icon?.dataAttributes?.["data-quality"] ?? "-1");
+    return {
+      "2": "Mars (purple)",
+      "1": "Neptune (blue)",
+      "0": "Ceres (green)"
+    }[id] || "Standard";
   }
 
   function resaleValueScore(item) {
@@ -446,6 +471,7 @@
     price,
     bidPrice,
     priceLabel,
+    qualityRank,
     resaleValueScore,
     scoreCustomDefinition,
     summarizeCustomDefinition,

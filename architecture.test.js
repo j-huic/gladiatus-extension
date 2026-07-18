@@ -424,7 +424,7 @@ function makeElement(tagName) {
 const { schema, score, model, core, arena, sim } = loadGlobals();
 
 {
-  assert.equal(core.version, "auction-core-v3");
+  assert.equal(core.version, "auction-core-v4");
   assert.equal(core.constants.pageBridgeRequestSource, "glad-ah-extension-v3");
   assert.equal(core.constants.pageBridgeResponseSource, "glad-ah-page-v3");
 }
@@ -647,7 +647,7 @@ const { schema, score, model, core, arena, sim } = loadGlobals();
 }
 
 {
-  // Guild market auto-pricing: flat 100k per unit, stacks only, wrapping marketDrop,
+  // Guild market auto-pricing: 100k per Mini-Pumpkin unit only, wrapping marketDrop,
   // plus a re-assert guard that defeats a late overwrite from another extension.
   const preisField = { value: "" };
   const sellidField = { value: "" };
@@ -695,21 +695,19 @@ const { schema, score, model, core, arena, sim } = loadGlobals();
   vm.runInContext(fs.readFileSync(path.join(rootDir, "guild-market-core.js"), "utf8"), context, { filename: "guild-market-core.js" });
 
   const guildMarket = context.GladiatusGuildMarket;
-  assert.equal(guildMarket.version, "guild-market-core-v1");
+  assert.equal(guildMarket.version, "guild-market-core-v2");
+  assert.equal(guildMarket.targetItemName, "Mini-Pumpkin");
   assert.equal(guildMarket.ratePerItem, 100000);
-  assert.equal(guildMarket.priceForStack(20), 2000000);
-  assert.equal(guildMarket.priceForStack("5"), 500000);
-  assert.equal(guildMarket.priceForStack(1), null);
-  assert.equal(guildMarket.priceForStack(0), null);
-  assert.equal(guildMarket.priceForStack("nope"), null);
   assert.equal(guildMarket.isGuildMarketUrl(doc.location.href), true);
   assert.equal(guildMarket.isGuildMarketUrl("https://s47-en.gladiatus.gameforge.com/game/index.php?mod=auction"), false);
 
   // Auto-installed on the guild market URL: marketDrop is now wrapped.
   assert.equal(context.marketDrop.__gladiatusAutoPrice, true);
 
-  // Stack of 20 -> game default runs first, then price is forced to 20 * 100000, fees refresh, guard armed.
-  context.marketDrop({}, 20);
+  // A Mini-Pumpkin stack -> game default runs first, then price is forced to 20 * 100000,
+  // fees refresh, and the guard is armed.
+  const miniPumpkin = { dataset: { tooltip: '[["Mini-Pumpkin"]]' } };
+  context.marketDrop(miniPumpkin, 20);
   assert.equal(originalDropCalls, 1);
   assert.equal(preisField.value, "2000000");
   assert.equal(calcDuesCalls, 1);
@@ -745,12 +743,18 @@ const { schema, score, model, core, arena, sim } = loadGlobals();
   for (let i = 0; i < ticks; i += 1) guardTick();
   assert.ok(clearedTimers > clearedBefore);
 
-  // Single item (amount 1) -> wrapper leaves the game default untouched and arms no guard.
+  // A single Mini-Pumpkin is priced at one unit's 100000 rate.
   sellidField.value = "";
   preisField.value = "DEFAULT";
-  const guardTickBefore = guardTick;
-  context.marketDrop({}, 1);
+  context.marketDrop(miniPumpkin, 1);
   assert.equal(originalDropCalls, 2);
+  assert.equal(preisField.value, "100000");
+
+  // Other items leave the game default untouched regardless of stack size.
+  preisField.value = "DEFAULT";
+  const guardTickBefore = guardTick;
+  context.marketDrop({ dataset: { tooltip: '[["Other item"]]' } }, 20);
+  assert.equal(originalDropCalls, 3);
   assert.equal(preisField.value, "DEFAULT");
   assert.equal(guardTick, guardTickBefore); // setInterval was not called again
 }
@@ -1106,7 +1110,7 @@ const { schema, score, model, core, arena, sim } = loadGlobals();
 
 {
   const tooltip = JSON.stringify([[
-    ["HTML Shield"],
+    ["HTML Shield", "#5159F7; text-shadow: 0 0 2px #000"],
     ["Damage +4"],
     ["Agility +7"],
     ["Level 41"],
@@ -1116,7 +1120,7 @@ const { schema, score, model, core, arena, sim } = loadGlobals();
     <form id="auctionForm-html">
       <input type="hidden" name="auctionid" value="auction-html">
       <input type="hidden" name="bid_amount" value="300">
-      <div class="auction_item_div item-i-1" data-tooltip='${tooltip}' data-price-gold="9.999" data-content-type="item" data-basis="base" style="background-image:url(/cdn/html-item.png)"></div>
+      <div class="auction_item_div item-i-1" data-tooltip='${tooltip}' data-price-gold="9.999" data-content-type="item" data-content-size="32" data-enchant-type="null" data-quality="1" data-hash="test-hash" data-basis="base" style="background-image:url(/cdn/html-item.png)"></div>
     </form>
   `;
   const [item] = core.parseAuctionItemsFromHtml(html, { categoryId: "main:2" });
@@ -1128,6 +1132,16 @@ const { schema, score, model, core, arena, sim } = loadGlobals();
   assert.equal(item.itemValue, 1500);
   assert.equal(item.stats.damageBonus, 4);
   assert.equal(item.stats.agility, 7);
+  assert.equal(item.quality.id, "1");
+  assert.equal(item.quality.name, "neptune");
+  assert.equal(item.quality.label, "Neptune");
+  assert.equal(item.quality.color, "blue");
+  assert.equal(item.quality.titleStyle, "#5159F7; text-shadow: 0 0 2px #000");
+  assert.equal(item.source.icon.dataAttributes["data-content-size"], "32");
+  assert.equal(item.source.icon.dataAttributes["data-enchant-type"], "null");
+  assert.equal(item.source.icon.dataAttributes["data-quality"], "1");
+  assert.equal(item.source.icon.dataAttributes["data-hash"], "test-hash");
+  assert.equal(JSON.stringify(item.source.icon.tooltip[0]), JSON.stringify(["HTML Shield", "#5159F7; text-shadow: 0 0 2px #000"]));
 }
 
 {
@@ -1161,6 +1175,19 @@ const { schema, score, model, core, arena, sim } = loadGlobals();
   assert.equal(model.resaleValueScore(item), 4);
   assert.equal(resalePreset.score(item), 4);
   assert.equal(resalePreset.display(item, resalePreset.score(item)), "Value / bid: 4");
+}
+
+{
+  const qualityPreset = model.getPreset("armor", "quality").preset;
+
+  assert.ok(qualityPreset);
+  assert.equal(qualityPreset.score({ quality: { id: "-1" } }), 0);
+  assert.equal(qualityPreset.score({ quality: { id: "0" } }), 1);
+  assert.equal(qualityPreset.score({ quality: { id: "1" } }), 2);
+  assert.equal(qualityPreset.score({ quality: { id: "2" } }), 3);
+  assert.equal(qualityPreset.display({ quality: { label: "Mars", color: "purple" } }), "Quality: Mars (purple)");
+  assert.ok(model.viewDefinitions.every((view) => view.presets.some((preset) => preset.id === "quality")));
+  assert.equal(model.getView("armor").presets.some((preset) => preset.id === "tank" || preset.id === "threat"), false);
 }
 
 {

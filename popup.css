@@ -208,6 +208,18 @@ button:disabled {
   margin-bottom: 4px;
 }
 
+.item-name.item-quality-green {
+  color: #7ee86b;
+}
+
+.item-name.item-quality-blue {
+  color: #8892ff;
+}
+
+.item-name.item-quality-purple {
+  color: #d28cff;
+}
+
 .meta {
   color: #a8926a;
   margin-bottom: 4px;

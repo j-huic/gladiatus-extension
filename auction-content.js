@@ -162,7 +162,6 @@
       "criticalattackvalue",
       "criticalhealingvalue",
       "criticaldamage",
-      "threat",
       "hardeningvalue",
       "damageAvg",
       "damageMax"
@@ -173,7 +172,6 @@
       blockvalue: "Tank stats",
       healing: "Tank stats",
       criticalhealingvalue: "Tank stats",
-      threat: "Tank stats",
       hardeningvalue: "Tank stats"
     };
 

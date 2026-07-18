@@ -3,8 +3,8 @@
 // On the guild market page (index.php?mod=guildMarket) the game prices a freshly
 // placed sell item via window.marketDrop(to, amount): it sets the hidden sellid,
 // fills #preis from the item's average/gold price, then recomputes fees through
-// calcDues(). We wrap marketDrop so that, for real stacks (amount > 1), the price
-// is forced to a flat RATE_PER_ITEM per unit. Single items keep the game default.
+// calcDues(). We wrap marketDrop so that Mini-Pumpkin is priced at 100,000 gold
+// per unit in its stack. Every other item keeps the game default.
 //
 // This runs in the MAIN world (see manifest content_scripts) so it can see the
 // page's marketDrop / calcDues globals directly. The drop machinery dispatches by
@@ -18,7 +18,8 @@
 // field. This wins the race regardless of the other extension's exact timing.
 (() => {
   const root = typeof globalThis !== "undefined" ? globalThis : window;
-  const CORE_VERSION = "guild-market-core-v1";
+  const CORE_VERSION = "guild-market-core-v2";
+  const TARGET_ITEM_NAME = "Mini-Pumpkin";
   const RATE_PER_ITEM = 100000;
   const GUARD_DURATION_MS = 1500;
   const GUARD_INTERVAL_MS = 50;
@@ -35,20 +36,46 @@
     }
   }
 
-  // Flat price for a placed stack: RATE_PER_ITEM per unit, but only for genuine
-  // stacks (amount > 1). Returns null when the game's default price should stand
-  // (single items, or a missing/invalid amount).
-  function priceForStack(amount, rate = RATE_PER_ITEM) {
-    const quantity = Number(amount);
-    if (!Number.isFinite(quantity) || quantity <= 1) return null;
-    return Math.floor(quantity) * rate;
+  function tooltipLines(element, context = root) {
+    const raw = element?.dataset?.tooltip || element?.getAttribute?.("data-tooltip") || "";
+    if (!raw) return [];
+
+    const parser = context.GladiatusAuctionCore?.parseTooltipLinesFromValue;
+    if (typeof parser === "function") return parser(raw, context.document || root.document);
+
+    try {
+      const tooltip = JSON.parse(raw);
+      const entries = Array.isArray(tooltip) && Array.isArray(tooltip[0]) ? tooltip[0] : [];
+      return entries
+        .map((entry) => String(Array.isArray(entry) ? entry[0] : entry).replace(/<[^>]*>/g, "").trim())
+        .filter(Boolean);
+    } catch {
+      return [];
+    }
   }
 
-  // Overwrite #preis with the flat stack price and refresh the fee display.
+  // `to` is the game's drop target. After marketDrop has run it contains the
+  // staged item; checking #sellForm also covers markup variants where it does not.
+  function isTargetItem(to, context = root) {
+    const doc = context.document || root.document;
+    const candidates = [to, to?.[0], to?.element, doc?.querySelector?.("#sellForm")];
+
+    return candidates.some((candidate) => {
+      if (!candidate) return false;
+      const icon = candidate.dataset?.tooltip || candidate.getAttribute?.("data-tooltip")
+        ? candidate
+        : candidate.querySelector?.("[data-tooltip]");
+      return tooltipLines(icon, context).some((line) => line === TARGET_ITEM_NAME);
+    });
+  }
+
+  // Overwrite #preis with the Mini-Pumpkin stack price and refresh the fee display.
   // Returns the applied price, or null when the game default should stand.
-  function applyAutoPrice(amount, context = root) {
-    const price = priceForStack(amount);
-    if (price === null) return null;
+  function applyAutoPrice(to, amount, context = root) {
+    if (!isTargetItem(to, context)) return null;
+    const quantity = Number(amount);
+    if (!Number.isFinite(quantity) || quantity <= 0) return null;
+    const price = Math.floor(quantity) * RATE_PER_ITEM;
     const doc = context.document || root.document;
     const field = doc?.getElementById("preis");
     if (!field) return null;
@@ -94,7 +121,7 @@
     }, GUARD_INTERVAL_MS);
   }
 
-  // Replace context.marketDrop with a wrapper that applies the flat stack price
+  // Replace context.marketDrop with a wrapper that applies the Mini-Pumpkin stack price
   // after the game's own pricing, then guards it. Idempotent; returns true once a
   // wrapper is in place (or marketDrop is not defined yet).
   function install(context = root) {
@@ -104,7 +131,7 @@
 
     function marketDrop(to, amount) {
       const result = original.apply(this, arguments);
-      const price = applyAutoPrice(amount, context);
+      const price = applyAutoPrice(to, amount, context);
       if (price !== null) guardPrice(price, context);
       return result;
     }
@@ -121,11 +148,13 @@
 
   root.GladiatusGuildMarket = {
     version: CORE_VERSION,
+    targetItemName: TARGET_ITEM_NAME,
     ratePerItem: RATE_PER_ITEM,
     guardDurationMs: GUARD_DURATION_MS,
     guardIntervalMs: GUARD_INTERVAL_MS,
     isGuildMarketUrl,
-    priceForStack,
+    tooltipLines,
+    isTargetItem,
     applyAutoPrice,
     reassertIfClobbered,
     guardPrice,
