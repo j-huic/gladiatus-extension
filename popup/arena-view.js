@@ -1,9 +1,9 @@
 import { ARENA, nodes, saveStorage, setStatus } from "./runtime.js";
 import {
   ARENA_PAGE_DEFINITIONS,
+  ARENA_UI_STATE_STORAGE_KEY,
   DEFAULT_ARENA_CONSTRAINT,
   DEFAULT_ARENA_TERM,
-  POPUP_STATE_KEY,
   cloneArenaFormula,
   getSelectedArenaFormula,
   makeNewArenaFormulaDraft,
@@ -29,12 +29,16 @@ export function createArenaView({ render, refreshSelfProfile }) {
 
   function renderArenaPageTabs() {
     nodes.pageTabs.hidden = false;
+    nodes.pageTabs.setAttribute("role", "tablist");
+    nodes.pageTabs.setAttribute("aria-label", "Arena workspace");
     const fragment = document.createDocumentFragment();
 
     for (const page of ARENA_PAGE_DEFINITIONS) {
       const button = document.createElement("button");
       button.type = "button";
       button.className = page.id === state.popupState.arenaPageId ? "active" : "";
+      button.setAttribute("role", "tab");
+      button.setAttribute("aria-selected", String(page.id === state.popupState.arenaPageId));
       button.dataset.pageId = page.id;
       button.textContent = page.label;
       fragment.append(button);
@@ -72,7 +76,7 @@ export function createArenaView({ render, refreshSelfProfile }) {
     label.className = "filter-control";
 
     const text = document.createElement("span");
-    text.textContent = "Formula";
+    text.textContent = "Ranking method";
 
     const select = document.createElement("select");
     select.dataset.arenaFormulaSelect = "1";
@@ -100,13 +104,15 @@ export function createArenaView({ render, refreshSelfProfile }) {
     refresh.type = "button";
     refresh.dataset.action = "refresh-self-profile";
     refresh.textContent = "Refresh self profile";
+    refresh.disabled = state.helperSettings?.features?.arena?.manualScan !== true
+      || state.helperSettings?.features?.arena?.simulations !== true;
     fragment.append(refresh);
 
     nodes.controls.replaceChildren(fragment);
   }
 
   function renderArenaFormulasPage() {
-    setStatus("Create role-aware arena formulas. Enabled formulas can be selected before scanning opponents.");
+    setStatus("Advanced: create role-aware ranking formulas. Enabled formulas can be selected before scanning opponents.");
     nodes.summary.hidden = true;
     nodes.summary.textContent = "";
     nodes.controls.hidden = true;
@@ -141,7 +147,7 @@ export function createArenaView({ render, refreshSelfProfile }) {
     scoreNode.className = "score";
     scoreNode.textContent = result.team
       ? Number.isFinite(arenaScore(result))
-        ? `Team score: ${ARENA.formatNumber(arenaScore(result))}`
+        ? `Estimated team strength: ${ARENA.formatNumber(arenaScore(result))}`
         : "Profile scan failed"
       : result.simulation?.ready
       ? simulationWinLabel(result)
@@ -164,12 +170,12 @@ export function createArenaView({ render, refreshSelfProfile }) {
 
   function arenaSummaryText(result) {
     if (result.arenaKind === "team") {
-      return `Lowest team score: ${result.bestName} (${ARENA.formatNumber(result.bestScore)})`;
+      return `Lowest estimated opposing team strength: ${result.bestName} (${ARENA.formatNumber(result.bestScore)})`;
     }
     const best = bestResultFromSummary(result);
     return best?.simulation?.ready
-      ? `Best win chance: ${result.bestName} (${formatPercent(best.simulation.winRate)})`
-      : `Best power: ${result.bestName} (${ARENA.formatNumber(result.bestScore)})`;
+      ? `Highest estimated win likelihood: ${result.bestName} (${formatPercent(best.simulation.winRate)})`
+      : `Lowest estimated opponent strength: ${result.bestName} (${ARENA.formatNumber(result.bestScore)})`;
   }
 
   function bestResultFromSummary(result) {
@@ -477,8 +483,8 @@ export function createArenaView({ render, refreshSelfProfile }) {
     const formulaSelect = event.target.closest("select[data-arena-formula-select]");
     if (!formulaSelect) return false;
 
-    state.popupState.arenaFormulaId = formulaSelect.value;
-    await saveStorage(POPUP_STATE_KEY, state.popupState);
+    state.arenaUiState = { ...state.arenaUiState, arenaFormulaId: formulaSelect.value };
+    await saveStorage(ARENA_UI_STATE_STORAGE_KEY, state.arenaUiState);
     return true;
   }
 
@@ -548,6 +554,8 @@ export function createArenaView({ render, refreshSelfProfile }) {
     }
 
     if (action === "delete-arena-formula") {
+      const formula = state.arenaFormulas.find((candidate) => candidate.id === actionNode.dataset.formulaId);
+      if (!window.confirm(`Delete the arena formula “${formula?.name || "Untitled"}”?`)) return true;
       state.arenaFormulas = state.arenaFormulas.filter((formula) => formula.id !== actionNode.dataset.formulaId);
       if (state.arenaFormulaDraft.id === actionNode.dataset.formulaId) state.arenaFormulaDraft = makeNewArenaFormulaDraft();
       await persistArenaFormulas();
@@ -575,9 +583,9 @@ export function createArenaView({ render, refreshSelfProfile }) {
 
       state.arenaFormulas = upsertArenaFormula(state.arenaFormulas, normalized);
       state.arenaFormulaDraft = { ...cloneArenaFormula(normalized), isNew: false };
-      state.popupState.arenaFormulaId = normalized.id;
+      state.arenaUiState = { ...state.arenaUiState, arenaFormulaId: normalized.id };
       await persistArenaFormulas();
-      await saveStorage(POPUP_STATE_KEY, state.popupState);
+      await saveStorage(ARENA_UI_STATE_STORAGE_KEY, state.arenaUiState);
       render();
       return true;
     }

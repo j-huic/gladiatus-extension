@@ -3,28 +3,45 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Gladiatus Auction Scanner</title>
+    <title>Gladiatus Helper (Unofficial)</title>
     <link rel="stylesheet" href="popup.css">
   </head>
   <body>
-    <header>
-      <h1>Auction scanner</h1>
+    <header class="app-header">
+      <div>
+        <h1>Gladiatus Helper</h1>
+        <div id="context-label" class="context-label">Unofficial</div>
+      </div>
       <button id="scan-button" type="button">Scan auction</button>
     </header>
 
-    <p id="status">Open a Gladiatus auction page, then scan.</p>
+    <nav id="app-nav" class="app-nav" aria-label="Popup sections">
+      <button type="button" data-shell-page="home">Home</button>
+      <button id="workspace-nav" type="button" data-shell-page="workspace">Current page</button>
+      <button type="button" data-shell-page="settings">Settings</button>
+    </nav>
+
+    <p id="status" role="status" aria-live="polite">Loading settings…</p>
 
     <nav id="page-tabs" class="page-tabs"></nav>
     <section id="summary" hidden></section>
     <nav id="tabs" class="tabs" hidden></nav>
     <section id="controls" class="controls" hidden></section>
-    <section id="results" class="results"></section>
+    <main id="results" class="results"></main>
 
-    <footer id="dev-log" class="dev-log">
-      <button id="dev-log-download" type="button">Download debug log</button>
-      <button id="dev-log-clear" type="button">Clear log</button>
-    </footer>
+    <aside id="diagnostics" class="diagnostics" hidden>
+      <details>
+        <summary>Diagnostics</summary>
+        <p>Debug logs stay in this browser until you clear or export them.</p>
+        <div id="dev-log" class="dev-log">
+          <button id="dev-log-download" type="button">Export debug log</button>
+          <button id="dev-log-clear" type="button">Clear debug log</button>
+        </div>
+      </details>
+    </aside>
 
+    <script src="helper-security.js"></script>
+    <script src="helper-settings.js"></script>
     <script src="log-core.js"></script>
     <script src="log-buffer.js"></script>
     <script src="log-drain.js"></script>
@@ -32,6 +49,7 @@
     <script src="auction-schema.js"></script>
     <script src="score-model.js"></script>
     <script src="auction-model.js"></script>
+    <script src="tooltip-parser.js"></script>
     <script src="auction-core.js"></script>
     <script src="arena-core.js"></script>
     <script src="arena-sim.js"></script>

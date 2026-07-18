@@ -1,13 +1,16 @@
-export const SCHEMA = window.GladiatusAuctionSchema;
-export const SCORE = window.GladiatusScoreModel;
-export const MODEL = window.GladiatusAuctionModel;
-export const CORE = window.GladiatusAuctionCore;
-export const ARENA = window.GladiatusArenaCore;
-export const ARENA_SIM = window.GladiatusArenaSim;
+export const SCHEMA = window.GladiatusAuctionSchema || null;
+export const SCORE = window.GladiatusScoreModel || null;
+export const MODEL = window.GladiatusAuctionModel || null;
+export const CORE = window.GladiatusAuctionCore || null;
+export const ARENA = window.GladiatusArenaCore || null;
+export const ARENA_SIM = window.GladiatusArenaSim || null;
+export const FEATURE_SETTINGS = window.GladiatusFeatureSettings || window.GladiatusHelperSettings || null;
 
-if (!SCHEMA || !SCORE || !MODEL || !CORE || !ARENA || !ARENA_SIM) {
-  throw new Error("Gladiatus auction schema, score model, auction model, auction core, arena core, and arena sim must load before the popup.");
-}
+export const featureModules = {
+  auction: Boolean(SCHEMA && SCORE && MODEL && CORE),
+  arena: Boolean(SCORE && ARENA && ARENA_SIM),
+  guildMarket: true
+};
 
 export const AUCTION_CONTENT_MESSAGES = {
   applySort: "GLAD_AH_APPLY_SORT_V2",
@@ -18,13 +21,17 @@ export const AUCTION_CONTENT_MESSAGES = {
 
 export const nodes = {
   title: document.querySelector("h1"),
+  contextLabel: document.getElementById("context-label"),
   scanButton: document.getElementById("scan-button"),
   status: document.getElementById("status"),
+  appNav: document.getElementById("app-nav"),
+  workspaceNav: document.getElementById("workspace-nav"),
   pageTabs: document.getElementById("page-tabs"),
   summary: document.getElementById("summary"),
   tabs: document.getElementById("tabs"),
   controls: document.getElementById("controls"),
-  results: document.getElementById("results")
+  results: document.getElementById("results"),
+  diagnostics: document.getElementById("diagnostics")
 };
 
 export async function getActiveTab() {
@@ -33,15 +40,13 @@ export async function getActiveTab() {
 }
 
 export function detectPageMode(url) {
-  if (ARENA.isArenaPageUrl(url)) return "arena";
-
   try {
     const parsed = new URL(url || "");
-    if (parsed.hostname.endsWith(".gladiatus.gameforge.com")
-      && parsed.pathname.endsWith("/game/index.php")
-      && parsed.searchParams.get("mod") === "auction") {
-      return "auction";
-    }
+    if (!parsed.hostname.endsWith(".gladiatus.gameforge.com") || !parsed.pathname.endsWith("/game/index.php")) return "unsupported";
+    const mod = parsed.searchParams.get("mod");
+    if (mod === "auction") return "auction";
+    if (mod === "arena") return "arena";
+    if (mod === "guildMarket") return "guildMarket";
   } catch {
     // Unsupported pages use the default mode.
   }
@@ -54,11 +59,11 @@ export async function sendAuctionScanMessage(tab) {
     const response = await sendTabMessage(tab.id, { type: AUCTION_CONTENT_MESSAGES.scanAll });
     if (response) return response;
   } catch {
-    await ensureAuctionContentScript(tab.id);
+    await ensureFeatureContentScript(tab.id, "auction");
     return sendTabMessage(tab.id, { type: AUCTION_CONTENT_MESSAGES.scanAll });
   }
 
-  await ensureAuctionContentScript(tab.id);
+  await ensureFeatureContentScript(tab.id, "auction");
   return sendTabMessage(tab.id, { type: AUCTION_CONTENT_MESSAGES.scanAll });
 }
 
@@ -70,7 +75,7 @@ export async function ensureAuctionPageUi(tab) {
     // Retry by explicitly injecting the current content scripts.
   }
 
-  await ensureAuctionContentScript(tab.id);
+  await ensureFeatureContentScript(tab.id, "auction");
   return sendTabMessage(tab.id, { type: AUCTION_CONTENT_MESSAGES.boot });
 }
 
@@ -84,11 +89,11 @@ export async function scanArenaOpponents(tab, formula) {
     const response = await sendTabMessage(tab.id, message);
     if (response) return response;
   } catch {
-    await ensureAuctionContentScript(tab.id);
+    await ensureFeatureContentScript(tab.id, "arena");
     return sendTabMessage(tab.id, message);
   }
 
-  await ensureAuctionContentScript(tab.id);
+  await ensureFeatureContentScript(tab.id, "arena");
   return sendTabMessage(tab.id, message);
 }
 
@@ -102,11 +107,11 @@ export async function refreshArenaSelfProfile(tab, options = {}) {
     const response = await sendTabMessage(tab.id, message);
     if (response) return response;
   } catch {
-    await ensureAuctionContentScript(tab.id);
+    await ensureFeatureContentScript(tab.id, "arena");
     return sendTabMessage(tab.id, message);
   }
 
-  await ensureAuctionContentScript(tab.id);
+  await ensureFeatureContentScript(tab.id, "arena");
   return sendTabMessage(tab.id, message);
 }
 
@@ -124,15 +129,52 @@ export function sendTabMessage(tabId, message) {
   });
 }
 
-export async function ensureAuctionContentScript(tabId) {
+export async function ensureFeatureContentScript(tabId, featureId) {
   if (!chrome.scripting?.executeScript) {
-    throw new Error("Auction content script is not available on this tab. Reload the auction page after reloading the extension.");
+    throw new Error("This feature is not available on the tab. Reload the page after reloading the extension.");
   }
+
+  const filesByFeature = {
+    auction: [
+      "helper-security.js",
+      "helper-settings.js",
+      "log-core.js",
+      "log-setup.js",
+      "auction-schema.js",
+      "score-model.js",
+      "auction-model.js",
+      "tooltip-parser.js",
+      "auction-core.js",
+      "auction-content.js",
+      "feature-runtime.js"
+    ],
+    arena: [
+      "helper-security.js",
+      "helper-settings.js",
+      "log-core.js",
+      "log-setup.js",
+      "score-model.js",
+      "arena-core.js",
+      "arena-sim.js",
+      "arena-scan.js",
+      "arena-passive-content.js",
+      "arena-status-content.js",
+      "arena-content.js",
+      "feature-runtime.js"
+    ]
+  };
+  const files = filesByFeature[featureId];
+  if (!files) throw new Error(`Unknown feature repair request: ${featureId}`);
 
   await chrome.scripting.executeScript({
     target: { tabId },
-    files: ["auction-schema.js", "score-model.js", "auction-model.js", "auction-core.js", "arena-core.js", "arena-sim.js", "arena-scan.js", "arena-passive-content.js", "arena-fight.js", "arena-header-button.js", "arena-status-content.js", "auction-content.js", "arena-content.js"]
+    files
   });
+}
+
+// Compatibility for callers that still use the old auction-specific name.
+export function ensureAuctionContentScript(tabId) {
+  return ensureFeatureContentScript(tabId, "auction");
 }
 
 export async function loadStorage(key) {
@@ -145,5 +187,5 @@ export async function saveStorage(key, value) {
 }
 
 export function setStatus(text) {
-  nodes.status.textContent = text;
+  if (nodes.status) nodes.status.textContent = text;
 }

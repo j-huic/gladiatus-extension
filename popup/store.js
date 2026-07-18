@@ -10,36 +10,48 @@ import {
   sendTabMessage
 } from "./runtime.js";
 
-export const SCAN_STORAGE_KEY = SCHEMA.storageKeys.scanResult;
-export const SCAN_ARCHIVE_STORAGE_KEY = SCHEMA.storageKeys.scanArchive;
-export const POPUP_STATE_KEY = SCHEMA.storageKeys.popupState;
-export const FILTER_VALUES_STORAGE_KEY = MODEL.filterValuesStorageKey;
+const FALLBACK_AUCTION_STORAGE_KEYS = {
+  customDefinitions: "glad-ah-custom-definitions-v1",
+  filterValues: "glad-ah-filter-values-v1",
+  popupState: "glad-ah-popup-state-v1",
+  scanArchive: "glad-ah-scan-archive-v1",
+  scanResult: "glad-ah-last-scan-v1",
+  sortState: "glad-ah-sorter-state-v1"
+};
+
+export const SCAN_STORAGE_KEY = SCHEMA?.storageKeys?.scanResult || FALLBACK_AUCTION_STORAGE_KEYS.scanResult;
+export const SCAN_ARCHIVE_STORAGE_KEY = SCHEMA?.storageKeys?.scanArchive || FALLBACK_AUCTION_STORAGE_KEYS.scanArchive;
+export const POPUP_STATE_KEY = SCHEMA?.storageKeys?.popupState || FALLBACK_AUCTION_STORAGE_KEYS.popupState;
+export const FILTER_VALUES_STORAGE_KEY = MODEL?.filterValuesStorageKey || FALLBACK_AUCTION_STORAGE_KEYS.filterValues;
+export const ARENA_UI_STATE_STORAGE_KEY = ARENA?.uiStateStorageKey || "glad-arena-ui-state-v1";
 export const MAX_SCAN_ARCHIVES = 5;
 
-export const VIEW_DEFINITIONS = MODEL.viewDefinitions;
+export const VIEW_DEFINITIONS = MODEL?.viewDefinitions || [];
 export const PAGE_DEFINITIONS = [
-  { id: "items", label: "Items" },
-  { id: "filters", label: "Filters" }
+  { id: "current", label: "Current page" },
+  { id: "items", label: "Auction scan" },
+  { id: "filters", label: "Ranking rules" }
 ];
 export const ARENA_PAGE_DEFINITIONS = [
   { id: "opponents", label: "Opponents" },
-  { id: "formulas", label: "Formulas" }
+  { id: "formulas", label: "Advanced formulas" }
 ];
 export const DEFAULT_TERM = { stat: "agility", weight: 1 };
 export const DEFAULT_CONSTRAINT = { stat: "damageBonus", op: ">=", value: 0 };
 export const DEFAULT_ARENA_TERM = { stat: "agility", weight: 1 };
 export const DEFAULT_ARENA_CONSTRAINT = { stat: "level", op: ">=", value: 0 };
-export const ARMOR_PIECE_OPTIONS = SCHEMA.mainScanCategories
+export const ARMOR_PIECE_OPTIONS = (SCHEMA?.mainScanCategories || [])
   .filter((category) => category.viewId === "armor")
   .map((category) => ({ itemType: category.itemType, label: category.label }));
 
 export const DEFAULT_POPUP_STATE = {
-  pageId: "items",
+  pageId: "current",
   arenaPageId: "opponents",
   viewId: "weapons",
   armorPiece: "",
   presetByView: {},
   filterByView: {},
+  // Kept only so the arena UI-state migration can read older popup state.
   arenaFormulaId: ""
 };
 
@@ -51,7 +63,12 @@ export const state = {
   arenaFormulas: [],
   editorDraft: null,
   arenaFormulaDraft: null,
+  arenaUiState: { arenaFormulaId: "" },
   popupState: normalizePopupState(),
+  helperSettings: null,
+  shellPage: "home",
+  guildRuleDraft: null,
+  openFeatureDetails: {},
   filterValuesByView: {},
   pageMode: "unsupported",
   activeTab: null
@@ -68,6 +85,7 @@ export function normalizePopupState(saved = {}) {
 }
 
 export async function loadArenaFormulas() {
+  if (!ARENA) return [];
   const saved = await loadStorage(ARENA.formulasStorageKey);
   if (saved !== null) return ARENA.normalizeArenaFormulas(saved);
 
@@ -77,6 +95,19 @@ export async function loadArenaFormulas() {
   const defaults = [ARENA.defaultArenaFormula()];
   await saveStorage(ARENA.formulasStorageKey, defaults);
   return defaults;
+}
+
+export async function loadArenaUiState(legacyPopupState = {}) {
+  const saved = await loadStorage(ARENA_UI_STATE_STORAGE_KEY);
+  if (saved && typeof saved === "object") {
+    return { arenaFormulaId: typeof saved.arenaFormulaId === "string" ? saved.arenaFormulaId : "" };
+  }
+
+  const migrated = {
+    arenaFormulaId: typeof legacyPopupState?.arenaFormulaId === "string" ? legacyPopupState.arenaFormulaId : ""
+  };
+  await saveStorage(ARENA_UI_STATE_STORAGE_KEY, migrated);
+  return migrated;
 }
 
 export async function persistCustomDefinitions() {
@@ -98,7 +129,7 @@ export function normalizeScanResult(result) {
 
   return {
     ...result,
-    parserVersion: CORE.version || result.parserVersion || "",
+    parserVersion: CORE?.version || result.parserVersion || "",
     categoriesScanned: categoryIds.size || result?.categoriesScanned || 0,
     categoryIdsScanned: result?.categoryIdsScanned || Array.from(categoryIds),
     scanWarnings: result?.scanWarnings || [],
@@ -111,10 +142,11 @@ export function normalizeScanItem(item) {
   if (!Array.isArray(item.lines) || !item.lines.length) return item;
 
   try {
+    if (!CORE?.parseStats) return item;
     const parsed = CORE.parseStats(item.lines);
     return {
       ...item,
-      parserVersion: CORE.version || item.parserVersion || "",
+      parserVersion: CORE?.version || item.parserVersion || "",
       level: parsed.level || item.level || 0,
       itemValue: parsed.itemValue || item.itemValue || 0,
       stats: parsed.stats || item.stats || {}
@@ -125,7 +157,7 @@ export function normalizeScanItem(item) {
 }
 
 export function sortScanItems(items) {
-  const categoryRank = new Map(SCHEMA.scanCategories.map((category, index) => [category.id, index]));
+  const categoryRank = new Map((SCHEMA?.scanCategories || []).map((category, index) => [category.id, index]));
 
   return [...items].sort((a, b) => {
     const categoryDiff = (categoryRank.get(a.categoryId) ?? 999) - (categoryRank.get(b.categoryId) ?? 999);
@@ -246,7 +278,7 @@ export function cloneArenaFormula(formula) {
 }
 
 export function validateDefinition(definition) {
-  if (!definition.name.trim()) return "Custom filter needs a name.";
+  if (!definition.name.trim()) return "Ranking rule needs a name.";
   if (!definition.appliesTo.length) return "Select at least one item group.";
   if (!definition.terms.length) return "Add at least one non-zero score term.";
   return "";
@@ -274,7 +306,7 @@ export function upsertArenaFormula(formulas, formula) {
 }
 
 export function getView() {
-  return VIEW_DEFINITIONS.find((view) => view.id === state.popupState.viewId) || VIEW_DEFINITIONS[0];
+  return VIEW_DEFINITIONS.find((view) => view.id === state.popupState.viewId) || VIEW_DEFINITIONS[0] || null;
 }
 
 export function getPresetOptions(view) {
@@ -304,9 +336,10 @@ export function itemMatchesSelectedPiece(item, view) {
 }
 
 export function getSelectedArenaFormula() {
+  if (!ARENA) return null;
   const enabled = state.arenaFormulas.filter((formula) => formula.enabled);
   const formulas = enabled.length ? enabled : state.arenaFormulas;
-  return formulas.find((formula) => formula.id === state.popupState.arenaFormulaId)
+  return formulas.find((formula) => formula.id === state.arenaUiState.arenaFormulaId)
     || formulas[0]
     || ARENA.defaultArenaFormula();
 }

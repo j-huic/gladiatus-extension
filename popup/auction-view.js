@@ -24,12 +24,16 @@ import {
 export function createAuctionView({ render, applyCurrentSortToPage }) {
   function renderPageTabs() {
     nodes.pageTabs.hidden = false;
+    nodes.pageTabs.setAttribute("role", "tablist");
+    nodes.pageTabs.setAttribute("aria-label", "Auction workspace");
     const fragment = document.createDocumentFragment();
 
     for (const page of PAGE_DEFINITIONS) {
       const button = document.createElement("button");
       button.type = "button";
       button.className = page.id === state.popupState.pageId ? "active" : "";
+      button.setAttribute("role", "tab");
+      button.setAttribute("aria-selected", String(page.id === state.popupState.pageId));
       button.dataset.pageId = page.id;
       button.textContent = page.label;
       fragment.append(button);
@@ -44,9 +48,9 @@ export function createAuctionView({ render, applyCurrentSortToPage }) {
 
     if (state.scanResult) {
       const warnings = state.scanResult.scanWarnings?.length ? ` ${state.scanResult.scanWarnings.length} warning(s).` : "";
-      setStatus(`Cached scan: ${items.length} items${scannedAt ? ` at ${scannedAt}` : ""}.${warnings}`);
+      setStatus(`Cached auction scan: ${items.length} items${scannedAt ? ` at ${scannedAt}` : ""}.${warnings} Ranking changes stay in the popup until you apply them.`);
     } else {
-      setStatus("No cached scan. Tabs and sort presets still apply to the visible auction page.");
+      setStatus("No cached auction scan. Choose a ranking below, then explicitly apply it to the current page.");
     }
 
     nodes.summary.hidden = !state.scanResult?.filterSummary && !state.scanResult?.scanWarnings?.length;
@@ -58,13 +62,39 @@ export function createAuctionView({ render, applyCurrentSortToPage }) {
     nodes.controls.hidden = false;
 
     ensureValidView(items);
-    renderItemTabs(items);
-    renderControls();
+    renderItemTabs(items, true);
+    renderControls({ showApply: false });
     renderItems();
   }
 
+  function renderCurrentPage() {
+    setStatus("Choose an item group and ranking, then explicitly apply it to the open auction page.");
+    nodes.summary.hidden = false;
+    nodes.summary.textContent = "Current page changes are separate from the cached Auction scan.";
+    nodes.tabs.hidden = false;
+    nodes.controls.hidden = false;
+    ensureValidView([]);
+    renderItemTabs([], false);
+    renderControls({ showApply: true });
+    renderCurrentPageSummary();
+  }
+
+  function renderCurrentPageSummary() {
+    const view = getView();
+    const preset = getSelectedPreset(view);
+    const panel = document.createElement("section");
+    panel.className = "settings-card";
+    const title = document.createElement("h2");
+    title.textContent = `${view.label}: ${preset.label}`;
+    const explanation = document.createElement("p");
+    explanation.className = "setting-help";
+    explanation.textContent = "Nothing changes while you choose options. Press Apply ranking to current page when ready.";
+    panel.append(title, explanation);
+    nodes.results.replaceChildren(panel);
+  }
+
   function renderFiltersPage() {
-    setStatus("Create custom score filters. Enabled filters appear as presets for their selected item groups.");
+    setStatus("Create custom ranking rules. Enabled rules appear as ranking choices for their selected item groups.");
     nodes.summary.hidden = true;
     nodes.summary.textContent = "";
     nodes.tabs.hidden = true;
@@ -86,7 +116,9 @@ export function createAuctionView({ render, applyCurrentSortToPage }) {
     state.popupState.viewId = firstPopulated?.id || VIEW_DEFINITIONS[0].id;
   }
 
-  function renderItemTabs(items) {
+  function renderItemTabs(items, showCounts = true) {
+    nodes.tabs.setAttribute("role", "tablist");
+    nodes.tabs.setAttribute("aria-label", "Auction item groups");
     const fragment = document.createDocumentFragment();
 
     for (const view of VIEW_DEFINITIONS) {
@@ -94,15 +126,17 @@ export function createAuctionView({ render, applyCurrentSortToPage }) {
       const button = document.createElement("button");
       button.type = "button";
       button.className = view.id === state.popupState.viewId ? "active" : "";
+      button.setAttribute("role", "tab");
+      button.setAttribute("aria-selected", String(view.id === state.popupState.viewId));
       button.dataset.viewId = view.id;
-      button.textContent = `${view.label} ${count}`;
+      button.textContent = showCounts ? `${view.label} ${count}` : view.label;
       fragment.append(button);
     }
 
     nodes.tabs.replaceChildren(fragment);
   }
 
-  function renderControls() {
+  function renderControls(options = {}) {
     const view = getView();
     const selectedPresetId = getSelectedPreset(view).id;
     const fragment = document.createDocumentFragment();
@@ -111,7 +145,7 @@ export function createAuctionView({ render, applyCurrentSortToPage }) {
 
     const label = document.createElement("span");
     label.className = "control-label";
-    label.textContent = "Sort";
+    label.textContent = "Ranking";
     fragment.append(label);
 
     for (const preset of getPresetOptions(view)) {
@@ -124,6 +158,16 @@ export function createAuctionView({ render, applyCurrentSortToPage }) {
     }
 
     renderFilterControls(fragment, view);
+
+    if (options.showApply) {
+      const apply = document.createElement("button");
+      apply.type = "button";
+      apply.dataset.action = "apply-ranking";
+      apply.textContent = "Apply ranking to current page";
+      apply.title = "Reorder the currently open auction page using this ranking and eligibility filters.";
+      apply.disabled = state.helperSettings?.features?.auction?.applyRankingToPage !== true;
+      fragment.append(apply);
+    }
     nodes.controls.replaceChildren(fragment);
   }
 
@@ -212,7 +256,7 @@ export function createAuctionView({ render, applyCurrentSortToPage }) {
     if (!items.length) {
       nodes.results.innerHTML = state.scanResult
         ? '<div class="empty">No items for this tab.</div>'
-        : '<div class="empty">Choose a tab or sort preset to reorder the current auction page. Scan only when you want the full cached item list.</div>';
+        : '<div class="empty">Choose an item group and ranking above. Use “Apply ranking to current page” to reorder the open auction, or scan to build a separate cached item list.</div>';
       return;
     }
 
@@ -279,7 +323,7 @@ export function createAuctionView({ render, applyCurrentSortToPage }) {
     editor.dataset.definitionId = state.editorDraft.id;
 
     const title = document.createElement("h2");
-    title.textContent = state.editorDraft.isNew ? "New custom filter" : "Edit custom filter";
+    title.textContent = state.editorDraft.isNew ? "New ranking rule" : "Edit ranking rule";
 
     const nameLabel = document.createElement("label");
     nameLabel.className = "field-row";
@@ -435,7 +479,7 @@ export function createAuctionView({ render, applyCurrentSortToPage }) {
     const save = document.createElement("button");
     save.type = "button";
     save.dataset.action = "save-definition";
-    save.textContent = definition.isNew ? "Create filter" : "Save filter";
+    save.textContent = definition.isNew ? "Create rule" : "Save rule";
 
     const reset = document.createElement("button");
     reset.type = "button";
@@ -451,13 +495,13 @@ export function createAuctionView({ render, applyCurrentSortToPage }) {
     list.className = "definition-list";
 
     const title = document.createElement("h2");
-    title.textContent = "Saved filters";
+    title.textContent = "Saved ranking rules";
     list.append(title);
 
     if (!state.customDefinitions.length) {
       const empty = document.createElement("div");
       empty.className = "empty";
-      empty.textContent = "No custom filters yet.";
+      empty.textContent = "No custom ranking rules yet.";
       list.append(empty);
       return list;
     }
@@ -577,11 +621,21 @@ export function createAuctionView({ render, applyCurrentSortToPage }) {
     state.popupState.viewId = button.dataset.viewId;
     await saveStorage(POPUP_STATE_KEY, state.popupState);
     render();
-    applyCurrentSortToPage();
     return true;
   }
 
   async function onPresetClick(event) {
+    const applyButton = event.target.closest("button[data-action='apply-ranking']");
+    if (applyButton) {
+      applyButton.disabled = true;
+      try {
+        await applyCurrentSortToPage();
+      } finally {
+        applyButton.disabled = false;
+      }
+      return true;
+    }
+
     const button = event.target.closest("button[data-preset-id]");
     if (!button) return false;
 
@@ -591,7 +645,6 @@ export function createAuctionView({ render, applyCurrentSortToPage }) {
     };
     await saveStorage(POPUP_STATE_KEY, state.popupState);
     render();
-    applyCurrentSortToPage();
     return true;
   }
 
@@ -600,7 +653,8 @@ export function createAuctionView({ render, applyCurrentSortToPage }) {
     if (armorPieceSelect) {
       state.popupState.armorPiece = armorPieceSelect.value;
       await saveStorage(POPUP_STATE_KEY, state.popupState);
-      renderItems();
+      if (state.popupState.pageId === "current") renderCurrentPageSummary();
+      else renderItems();
       return true;
     }
 
@@ -616,8 +670,8 @@ export function createAuctionView({ render, applyCurrentSortToPage }) {
       }
     };
     await saveStorage(FILTER_VALUES_STORAGE_KEY, MODEL.normalizeAllFilterValues(state.filterValuesByView));
-    renderItems();
-    applyCurrentSortToPage();
+    if (state.popupState.pageId === "current") renderCurrentPageSummary();
+    else renderItems();
     return true;
   }
 
@@ -673,6 +727,8 @@ export function createAuctionView({ render, applyCurrentSortToPage }) {
     }
 
     if (action === "delete-definition") {
+      const definition = state.customDefinitions.find((candidate) => candidate.id === actionNode.dataset.definitionId);
+      if (!window.confirm(`Delete the ranking rule “${definition?.name || "Untitled"}”?`)) return true;
       state.customDefinitions = state.customDefinitions.filter((definition) => definition.id !== actionNode.dataset.definitionId);
       if (state.editorDraft.id === actionNode.dataset.definitionId) state.editorDraft = makeNewDefinitionDraft();
       await persistCustomDefinitions();
@@ -751,6 +807,7 @@ export function createAuctionView({ render, applyCurrentSortToPage }) {
 
   return {
     renderPageTabs,
+    renderCurrentPage,
     renderItemsPage,
     renderFiltersPage,
     renderControls,
