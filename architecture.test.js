@@ -80,7 +80,7 @@ function loadGlobals() {
   context.globalThis = context;
   vm.createContext(context);
 
-  for (const file of ["auction-schema.js", "score-model.js", "auction-model.js", "auction-core.js", "arena-core.js", "arena-sim.js"]) {
+  for (const file of ["auction-schema.js", "score-model.js", "auction-model.js", "tooltip-parser.js", "auction-core.js", "arena-core.js", "arena-sim.js"]) {
     vm.runInContext(fs.readFileSync(path.join(rootDir, file), "utf8"), context, { filename: file });
   }
 
@@ -190,7 +190,7 @@ function makeAuctionBackgroundScannerContext(options = {}) {
   context.globalThis = context;
   vm.createContext(context);
 
-  for (const file of ["auction-schema.js", "auction-core.js", "auction-background-scan.js"]) {
+  for (const file of ["auction-schema.js", "tooltip-parser.js", "auction-core.js", "auction-background-scan.js"]) {
     vm.runInContext(fs.readFileSync(path.join(rootDir, file), "utf8"), context, { filename: file });
   }
 
@@ -236,7 +236,8 @@ function makeAuctionContentContext(listeners) {
           async set() {}
         },
         onChanged: {
-          addListener() {}
+          addListener() {},
+          removeListener() {}
         }
       }
     },
@@ -253,6 +254,7 @@ function makeAuctionContentContext(listeners) {
         this.callback = callback;
       }
       observe() {}
+      disconnect() {}
     }
   };
   context.window = context;
@@ -271,6 +273,7 @@ function makeContentDocument() {
     readyState: "complete",
     location: { href: "https://s1.gladiatus.gameforge.com/game/index.php?mod=auction&itemType=2" },
     addEventListener() {},
+    removeEventListener() {},
     createDocumentFragment() {
       return makeElement("#fragment");
     },
@@ -424,7 +427,7 @@ function makeElement(tagName) {
 const { schema, score, model, core, arena, sim } = loadGlobals();
 
 {
-  assert.equal(core.version, "auction-core-v4");
+  assert.equal(core.version, "auction-core-v5");
   assert.equal(core.constants.pageBridgeRequestSource, "glad-ah-extension-v3");
   assert.equal(core.constants.pageBridgeResponseSource, "glad-ah-page-v3");
 }
@@ -512,32 +515,80 @@ const { schema, score, model, core, arena, sim } = loadGlobals();
   const arenaStatusContentSource = fs.readFileSync(path.join(rootDir, "arena-status-content.js"), "utf8");
   const popupSource = fs.readFileSync(path.join(rootDir, "popup.js"), "utf8");
   const popupRuntimeSource = fs.readFileSync(path.join(rootDir, "popup/runtime.js"), "utf8");
+  const popupStoreSource = fs.readFileSync(path.join(rootDir, "popup/store.js"), "utf8");
   const mainEntry = manifest.content_scripts.find((entry) => entry.world === "MAIN");
   const isolatedEntries = manifest.content_scripts.filter((entry) => entry.world !== "MAIN");
 
+  assert.equal(manifest.name, "Gladiatus Helper (Unofficial)");
+  assert.equal(manifest.permissions.includes("downloads"), false);
   assert.equal(manifest.background.service_worker, "background.js");
-  assert.match(backgroundSource, /importScripts\("log-core\.js", "log-buffer\.js", "log-setup\.js", "auction-schema\.js", "auction-core\.js", "score-model\.js", "arena-core\.js", "arena-sim\.js", "arena-background-scan\.js", "auction-background-scan\.js"\);/);
+  assert.match(backgroundSource, /"helper-security\.js"/);
+  assert.match(backgroundSource, /"helper-settings\.js"/);
+  assert.match(backgroundSource, /const FEATURE_CONTENT_FILES = Object\.freeze/);
+  assert.match(backgroundSource, /GLAD_FEATURE_REPAIR/);
+  assert.match(backgroundSource, /FEATURE_DISABLED/);
+  assert.match(backgroundSource, /isAllowedGameforgeUrl/);
+  assert.ok(backgroundSource.indexOf("helper-security.js") < backgroundSource.indexOf("helper-settings.js"));
   assert.ok(backgroundSource.indexOf("auction-schema.js") < backgroundSource.indexOf("auction-core.js"));
+  assert.ok(backgroundSource.indexOf("tooltip-parser.js") < backgroundSource.indexOf("auction-core.js"));
   assert.ok(backgroundSource.indexOf("auction-core.js") < backgroundSource.indexOf("score-model.js"));
   assert.ok(backgroundSource.indexOf("score-model.js") < backgroundSource.indexOf("arena-core.js"));
   assert.ok(backgroundSource.indexOf("arena-core.js") < backgroundSource.indexOf("arena-sim.js"));
   assert.ok(backgroundSource.indexOf("arena-sim.js") < backgroundSource.indexOf("arena-background-scan.js"));
   assert.ok(backgroundSource.indexOf("arena-background-scan.js") < backgroundSource.indexOf("auction-background-scan.js"));
-  const repairFiles = backgroundSource.match(/const AUCTION_CONTENT_FILES = \[([\s\S]*?)\];/)?.[1] || "";
-  assert.ok(repairFiles.indexOf("\"arena-sim.js\"") < repairFiles.indexOf("\"arena-scan.js\""));
-  assert.ok(repairFiles.indexOf("\"arena-scan.js\"") < repairFiles.indexOf("\"arena-passive-content.js\""));
-  assert.ok(repairFiles.indexOf("\"arena-passive-content.js\"") < repairFiles.indexOf("\"arena-fight.js\""));
-  assert.ok(repairFiles.indexOf("\"arena-fight.js\"") < repairFiles.indexOf("\"arena-header-button.js\""));
-  assert.ok(repairFiles.indexOf("\"arena-header-button.js\"") < repairFiles.indexOf("\"arena-status-content.js\""));
-  assert.ok(repairFiles.indexOf("\"arena-status-content.js\"") < repairFiles.indexOf("\"arena-content.js\""));
-  assert.equal(repairFiles.includes("arena-background-scan.js"), false);
-  assert.equal(repairFiles.includes("auction-background-scan.js"), false);
-  assert.deepEqual(mainEntry.js, ["auction-schema.js", "auction-core.js", "guild-market-core.js"]);
+
+  function repairFilesFor(featureId) {
+    const match = backgroundSource.match(new RegExp(`\\n  ${featureId}: \\[([\\s\\S]*?)\\n  \\]`));
+    return Array.from((match?.[1] || "").matchAll(/"([^"]+\.js)"/g), (entry) => entry[1]);
+  }
+
+  const auctionRepairFiles = repairFilesFor("auction");
+  const arenaRepairFiles = repairFilesFor("arena");
+  const guildRepairFiles = repairFilesFor("guildMarket");
+  assert.deepEqual(auctionRepairFiles, [
+    "helper-security.js",
+    "helper-settings.js",
+    "auction-schema.js",
+    "tooltip-parser.js",
+    "score-model.js",
+    "auction-model.js",
+    "auction-core.js",
+    "auction-content.js",
+    "feature-runtime.js"
+  ]);
+  assert.deepEqual(arenaRepairFiles, [
+    "helper-security.js",
+    "helper-settings.js",
+    "score-model.js",
+    "arena-core.js",
+    "arena-sim.js",
+    "arena-scan.js",
+    "arena-passive-content.js",
+    "arena-status-content.js",
+    "arena-content.js",
+    "feature-runtime.js"
+  ]);
+  assert.deepEqual(guildRepairFiles, [
+    "helper-security.js",
+    "helper-settings.js",
+    "guild-market-content.js",
+    "feature-runtime.js"
+  ]);
+  assert.equal(auctionRepairFiles.some((file) => file.startsWith("arena-") || file.startsWith("guild-market")), false);
+  assert.equal(arenaRepairFiles.some((file) => file.startsWith("auction-") || file.startsWith("guild-market")), false);
+  assert.equal(guildRepairFiles.some((file) => file.startsWith("auction-") || file.startsWith("arena-")), false);
+  assert.equal(auctionRepairFiles.includes("auction-background-scan.js"), false);
+  assert.equal(arenaRepairFiles.includes("arena-background-scan.js"), false);
+
+  assert.deepEqual(mainEntry.js, ["auction-schema.js", "tooltip-parser.js", "auction-core.js", "guild-market-core.js"]);
   assert.equal(isolatedEntries.length, 1);
   assert.deepEqual(isolatedEntries[0].js, [
+    "helper-security.js",
+    "helper-settings.js",
     "log-core.js",
     "log-setup.js",
     "auction-schema.js",
+    "tooltip-parser.js",
     "score-model.js",
     "auction-model.js",
     "auction-core.js",
@@ -545,23 +596,26 @@ const { schema, score, model, core, arena, sim } = loadGlobals();
     "arena-sim.js",
     "arena-scan.js",
     "arena-passive-content.js",
-    "arena-fight.js",
-    "arena-header-button.js",
     "arena-status-content.js",
+    "guild-market-content.js",
     "auction-content.js",
-    "arena-content.js"
+    "arena-content.js",
+    "feature-runtime.js"
   ]);
+  assert.ok(isolatedEntries[0].js.indexOf("helper-settings.js") < isolatedEntries[0].js.indexOf("feature-runtime.js"));
+  assert.ok(isolatedEntries[0].js.indexOf("tooltip-parser.js") < isolatedEntries[0].js.indexOf("auction-core.js"));
   assert.ok(isolatedEntries[0].js.indexOf("arena-sim.js") < isolatedEntries[0].js.indexOf("arena-scan.js"));
   assert.ok(isolatedEntries[0].js.indexOf("arena-scan.js") < isolatedEntries[0].js.indexOf("arena-passive-content.js"));
-  assert.ok(isolatedEntries[0].js.indexOf("arena-passive-content.js") < isolatedEntries[0].js.indexOf("arena-fight.js"));
-  assert.ok(isolatedEntries[0].js.indexOf("arena-fight.js") < isolatedEntries[0].js.indexOf("arena-header-button.js"));
-  assert.ok(isolatedEntries[0].js.indexOf("arena-header-button.js") < isolatedEntries[0].js.indexOf("arena-status-content.js"));
+  assert.ok(isolatedEntries[0].js.indexOf("arena-passive-content.js") < isolatedEntries[0].js.indexOf("arena-status-content.js"));
   assert.ok(isolatedEntries[0].js.indexOf("arena-status-content.js") < isolatedEntries[0].js.indexOf("arena-content.js"));
   assert.match(arenaScanSource, /GLAD_ARENA_REFRESH_SELF_PROFILE/);
   assert.match(backgroundSource, /GLAD_ARENA_REFRESH_SELF_PROFILE/);
   assert.match(popupRuntimeSource, /function refreshArenaSelfProfile/);
   assert.match(popupRuntimeSource, /ARENA_SIM/);
-  assert.match(popupSource, /ARENA\.selfProfileStorageKey/);
+  assert.match(popupSource, /arenaStorageKey\("selfProfile"\)/);
+  assert.match(popupStoreSource, /ARENA_UI_STATE_STORAGE_KEY/);
+  assert.match(popupStoreSource, /glad-arena-ui-state-v1/);
+  assert.match(popupStoreSource, /loadArenaUiState/);
   assert.doesNotMatch(arenaScanSource, /glad-arena-passive-status/);
   assert.doesNotMatch(arenaScanSource, /startFight|startGroupFight|startProvinciarumFight/);
   assert.doesNotMatch(arenaScanSource, /MutationObserver/);
@@ -581,23 +635,9 @@ const { schema, score, model, core, arena, sim } = loadGlobals();
   assert.match(arenaStatusContentSource, /chrome\.storage\.onChanged\.addListener/);
   assert.match(arenaStatusContentSource, /\.\.\.STATUS_KINDS\.map/);
   assert.doesNotMatch(arenaStatusContentSource, /GLAD_ARENA_PASSIVE_CHECK|GLAD_ARENA_FORCE_SCAN|GLAD_ARENA_ENSURE_VISIBLE_SCAN/);
-  assert.match(arenaStatusContentSource, /GladiatusArenaFight/);
-  assert.match(arenaStatusContentSource, /glad-arena-fight-button/);
-  assert.match(arenaStatusContentSource, /outcome\.reportUrl/);
-  const arenaFightSource = fs.readFileSync(path.join(rootDir, "arena-fight.js"), "utf8");
-  assert.match(arenaFightSource, /root\.GladiatusArenaFight/);
-  assert.match(arenaFightSource, /submod=doCombat/);
-  assert.match(arenaFightSource, /doGroupFight\.php/);
-  assert.match(arenaFightSource, /doArenaFight\.php/);
-  assert.match(arenaFightSource, /X-CSRF-Token/);
-  // The fight module must stay UI-agnostic so the button can be relocated freely.
-  assert.doesNotMatch(arenaFightSource, /glad-arena-passive-status|glad-arena-fight-button|createElement|document\.body/);
-  const arenaHeaderButtonSource = fs.readFileSync(path.join(rootDir, "arena-header-button.js"), "utf8");
-  assert.match(arenaHeaderButtonSource, /glad-arena-header-button/);
-  assert.match(arenaHeaderButtonSource, /arenaPlace/);
-  assert.match(arenaHeaderButtonSource, /grouparenaPlace/);
-  assert.match(arenaHeaderButtonSource, /GladiatusArenaFight/);
-  assert.match(arenaHeaderButtonSource, /loadBestTarget/);
+  assert.match(arenaStatusContentSource, /GladiatusArenaStatusFeature/);
+  assert.match(arenaStatusContentSource, /\bstart\b/);
+  assert.match(arenaStatusContentSource, /\bstop\b/);
   const arenaContentSource = fs.readFileSync(path.join(rootDir, "arena-content.js"), "utf8");
   assert.match(arenaContentSource, /__GladiatusArenaContentBootstrapped/);
   assert.match(arenaContentSource, /GLAD_ARENA_BOOT_V2/);
@@ -613,13 +653,33 @@ const { schema, score, model, core, arena, sim } = loadGlobals();
   assert.match(backgroundArenaSource, /self simulation profile state/);
   assert.match(backgroundArenaSource, /single scan completed without win simulations/);
   assert.match(backgroundArenaSource, /console\.warn\(LOG_PREFIX/);
-  assert.match(popupRuntimeSource, /ensureAuctionContentScript\(tab\.id\);\s+return sendTabMessage\(tab\.id, message\);/);
+  assert.match(popupRuntimeSource, /ensureFeatureContentScript\(tab\.id, "auction"\)/);
+  assert.match(popupRuntimeSource, /ensureFeatureContentScript\(tab\.id, "arena"\)/);
   assert.ok(popupRuntimeSource.indexOf("\"arena-scan.js\"") < popupRuntimeSource.indexOf("\"arena-passive-content.js\""));
-  assert.ok(popupRuntimeSource.indexOf("\"arena-passive-content.js\"") < popupRuntimeSource.indexOf("\"arena-fight.js\""));
-  assert.ok(popupRuntimeSource.indexOf("\"arena-fight.js\"") < popupRuntimeSource.indexOf("\"arena-header-button.js\""));
-  assert.ok(popupRuntimeSource.indexOf("\"arena-header-button.js\"") < popupRuntimeSource.indexOf("\"arena-status-content.js\""));
+  assert.ok(popupRuntimeSource.indexOf("\"arena-passive-content.js\"") < popupRuntimeSource.indexOf("\"arena-status-content.js\""));
   assert.ok(popupRuntimeSource.indexOf("\"arena-status-content.js\"") < popupRuntimeSource.indexOf("\"arena-content.js\""));
   assert.equal(fs.existsSync(path.join(rootDir, "content.js")), false);
+  assert.equal(fs.existsSync(path.join(rootDir, "arena-fight.js")), false);
+  assert.equal(fs.existsSync(path.join(rootDir, "arena-header-button.js")), false);
+
+  const auctionContentSource = fs.readFileSync(path.join(rootDir, "auction-content.js"), "utf8");
+  const guildContentSource = fs.readFileSync(path.join(rootDir, "guild-market-content.js"), "utf8");
+  const featureRuntimeSource = fs.readFileSync(path.join(rootDir, "feature-runtime.js"), "utf8");
+  for (const [source, controllerName] of [
+    [auctionContentSource, "GladiatusAuctionFeature"],
+    [arenaContentSource, "GladiatusArenaFeature"],
+    [guildContentSource, "GladiatusGuildMarketController"]
+  ]) {
+    assert.match(source, new RegExp(controllerName));
+    assert.match(source, /\bstart\b/);
+    assert.match(source, /\bupdate\b/);
+    assert.match(source, /\bstop\b/);
+    assert.match(source, /\bgetStatus\b/);
+  }
+  assert.match(featureRuntimeSource, /GladiatusFeatureSettings/);
+  assert.match(featureRuntimeSource, /controller\.start/);
+  assert.match(featureRuntimeSource, /controller\.update/);
+  assert.match(featureRuntimeSource, /controller\.stop/);
 
   const referencedFiles = [
     ...manifest.content_scripts.flatMap((entry) => [...(entry.js || []), ...(entry.css || [])]),
@@ -630,9 +690,15 @@ const { schema, score, model, core, arena, sim } = loadGlobals();
     "arena-sim.js",
     "arena-passive-content.js",
     "arena-status-content.js",
+    "guild-market-content.js",
+    "helper-security.js",
+    "helper-settings.js",
+    "feature-runtime.js",
+    "tooltip-parser.js",
     "popup.js",
     "popup/runtime.js",
     "popup/store.js",
+    "popup/settings-view.js",
     "popup/auction-view.js",
     "popup/arena-view.js"
   ];
@@ -641,138 +707,71 @@ const { schema, score, model, core, arena, sim } = loadGlobals();
   }
 
   const popupHtml = fs.readFileSync(path.join(rootDir, "popup.html"), "utf8");
+  assert.match(popupHtml, /<nav\s+id="app-nav"/);
+  assert.match(popupHtml, />Home<\/button>/);
+  assert.match(popupHtml, />Settings<\/button>/);
+  assert.match(popupHtml, /<script\s+src="helper-security\.js"><\/script>/);
+  assert.match(popupHtml, /<script\s+src="helper-settings\.js"><\/script>/);
   assert.match(popupHtml, /<script\s+src="auction-core\.js"><\/script>/);
   assert.match(popupHtml, /<script\s+src="arena-sim\.js"><\/script>/);
   assert.match(popupHtml, /<script\s+type="module"\s+src="popup\.js"><\/script>/);
+  assert.ok(popupHtml.indexOf("tooltip-parser.js") < popupHtml.indexOf("auction-core.js"));
+
+  assert.match(popupStoreSource, /label: "Current page"/);
+  assert.match(popupStoreSource, /label: "Auction scan"/);
+  assert.match(popupStoreSource, /label: "Ranking rules"/);
+  assert.doesNotMatch(popupRuntimeSource, /Missing popup dependencies/);
+
+  const packagedFiles = [
+    ...fs.readdirSync(rootDir)
+      .filter((file) => file.endsWith(".js") && !file.endsWith(".test.js"))
+      .map((file) => path.join(rootDir, file)),
+    ...fs.readdirSync(path.join(rootDir, "popup"))
+      .filter((file) => file.endsWith(".js"))
+      .map((file) => path.join(rootDir, "popup", file))
+  ];
+  const packagedSources = packagedFiles
+    .map((file) => fs.readFileSync(file, "utf8"))
+    .join("\n");
+  assert.doesNotMatch(packagedSources, /submod=doCombat|doGroupFight\.php|doArenaFight\.php|GladiatusArenaFight/);
+  assert.doesNotMatch(packagedSources, /submod=(?:bid|buy|purchase|sell)|do(?:Bid|Buy|Purchase|Sell)\.php/i);
+  const guildMarketSources = ["guild-market-core.js", "guild-market-content.js"]
+    .map((file) => fs.readFileSync(path.join(rootDir, file), "utf8"))
+    .join("\n");
+  assert.doesNotMatch(guildMarketSources, /\.submit\s*\(|requestSubmit\s*\(/);
+  assert.doesNotMatch(guildMarketSources, /\.click\s*\(/);
 }
 
-{
-  // Guild market auto-pricing: 100k per Mini-Pumpkin unit only, wrapping marketDrop,
-  // plus a re-assert guard that defeats a late overwrite from another extension.
-  const preisField = { value: "" };
-  const sellidField = { value: "" };
-  let activeElement = null;
-  const doc = {
-    location: { href: "https://s47-en.gladiatus.gameforge.com/game/index.php?mod=guildMarket&sh=abc" },
-    get activeElement() {
-      return activeElement;
-    },
-    getElementById(id) {
-      return id === "preis" ? preisField : null;
-    },
-    querySelector(selector) {
-      return selector === "#sellForm [name=\"sellid\"]" ? sellidField : null;
-    }
-  };
-  let calcDuesCalls = 0;
-  let originalDropCalls = 0;
-  let guardTick = null;
-  let clearedTimers = 0;
-  const context = {
-    console,
-    URL,
-    document: doc,
-    location: doc.location,
-    marketDrop() {
-      originalDropCalls += 1;
-      sellidField.value = "ITEM-1";
-      preisField.value = "DEFAULT"; // stands in for the game's average/gold price
-    },
-    calcDues() {
-      calcDuesCalls += 1;
-    },
-    setInterval(callback) {
-      guardTick = callback; // capture the guard's tick so the test can drive it
-      return 1;
-    },
-    clearInterval() {
-      clearedTimers += 1;
-    }
-  };
-  context.window = context;
-  context.globalThis = context;
-  vm.createContext(context);
-  vm.runInContext(fs.readFileSync(path.join(rootDir, "guild-market-core.js"), "utf8"), context, { filename: "guild-market-core.js" });
-
-  const guildMarket = context.GladiatusGuildMarket;
-  assert.equal(guildMarket.version, "guild-market-core-v2");
-  assert.equal(guildMarket.targetItemName, "Mini-Pumpkin");
-  assert.equal(guildMarket.ratePerItem, 100000);
-  assert.equal(guildMarket.isGuildMarketUrl(doc.location.href), true);
-  assert.equal(guildMarket.isGuildMarketUrl("https://s47-en.gladiatus.gameforge.com/game/index.php?mod=auction"), false);
-
-  // Auto-installed on the guild market URL: marketDrop is now wrapped.
-  assert.equal(context.marketDrop.__gladiatusAutoPrice, true);
-
-  // A Mini-Pumpkin stack -> game default runs first, then price is forced to 20 * 100000,
-  // fees refresh, and the guard is armed.
-  const miniPumpkin = { dataset: { tooltip: '[["Mini-Pumpkin"]]' } };
-  context.marketDrop(miniPumpkin, 20);
-  assert.equal(originalDropCalls, 1);
-  assert.equal(preisField.value, "2000000");
-  assert.equal(calcDuesCalls, 1);
-  assert.equal(typeof guardTick, "function");
-
-  // Another extension clobbers our price ~100ms later -> the guard restores it on the next tick.
-  preisField.value = "6466";
-  guardTick();
-  assert.equal(preisField.value, "2000000");
-  assert.equal(calcDuesCalls, 2);
-
-  // A tick with nothing to fix is a no-op.
-  guardTick();
-  assert.equal(calcDuesCalls, 2);
-
-  // While the user is editing the price field, the guard must not fight them.
-  activeElement = preisField;
-  preisField.value = "12345";
-  guardTick();
-  assert.equal(preisField.value, "12345");
-  assert.equal(calcDuesCalls, 2);
-  activeElement = null;
-
-  // If a different item (or none) is now staged, the guard stops re-asserting the old price.
-  sellidField.value = "ITEM-2";
-  preisField.value = "777";
-  guardTick();
-  assert.equal(preisField.value, "777");
-
-  // The guard clears itself once its window elapses.
-  const clearedBefore = clearedTimers;
-  const ticks = Math.ceil(guildMarket.guardDurationMs / guildMarket.guardIntervalMs) + 1;
-  for (let i = 0; i < ticks; i += 1) guardTick();
-  assert.ok(clearedTimers > clearedBefore);
-
-  // A single Mini-Pumpkin is priced at one unit's 100000 rate.
-  sellidField.value = "";
-  preisField.value = "DEFAULT";
-  context.marketDrop(miniPumpkin, 1);
-  assert.equal(originalDropCalls, 2);
-  assert.equal(preisField.value, "100000");
-
-  // Other items leave the game default untouched regardless of stack size.
-  preisField.value = "DEFAULT";
-  const guardTickBefore = guardTick;
-  context.marketDrop({ dataset: { tooltip: '[["Other item"]]' } }, 20);
-  assert.equal(originalDropCalls, 3);
-  assert.equal(preisField.value, "DEFAULT");
-  assert.equal(guardTick, guardTickBefore); // setInterval was not called again
-}
-
-{
+async function runAuctionContentLifecycleTests() {
   const listeners = [];
   const context = makeAuctionContentContext(listeners);
   vm.runInContext(fs.readFileSync(path.join(rootDir, "auction-content.js"), "utf8"), context, { filename: "auction-content.js" });
 
+  assert.equal(context.__GladiatusAuctionMissingDependencyListener, undefined);
+  assert.equal(context.GladiatusAuctionFeature.ready, false);
+  assert.equal(listeners.length, 0);
+
+  await context.GladiatusAuctionFeature.start({ enabled: true, pageSorter: true });
   assert.equal(typeof context.__GladiatusAuctionMissingDependencyListener, "function");
   assert.equal(listeners.length, 1);
 
-  for (const file of ["auction-schema.js", "score-model.js", "auction-model.js", "auction-core.js"]) {
+  for (const file of ["auction-schema.js", "score-model.js", "auction-model.js", "tooltip-parser.js", "auction-core.js"]) {
     vm.runInContext(fs.readFileSync(path.join(rootDir, file), "utf8"), context, { filename: file });
   }
   vm.runInContext(fs.readFileSync(path.join(rootDir, "auction-content.js"), "utf8"), context, { filename: "auction-content.js" });
 
   assert.equal(context.__GladiatusAuctionMissingDependencyListener, undefined);
+  assert.equal(context.GladiatusAuctionFeature.ready, true);
+  assert.equal(listeners.length, 0);
+
+  const enabledSettings = {
+    enabled: true,
+    pageSorter: true,
+    fullScan: true,
+    scoreBadges: true,
+    applyRankingToPage: false
+  };
+  await context.GladiatusAuctionFeature.start(enabledSettings);
   assert.equal(listeners.length, 1);
 
   const responses = [];
@@ -786,6 +785,11 @@ const { schema, score, model, core, arena, sim } = loadGlobals();
     itemForms: 0,
     hasFilterForm: false
   }]);
+
+  await context.GladiatusAuctionFeature.start(enabledSettings);
+  assert.equal(listeners.length, 1);
+  await context.GladiatusAuctionFeature.stop();
+  assert.equal(listeners.length, 0);
 }
 
 {
@@ -1848,104 +1852,8 @@ async function runBackgroundScannerTests() {
   assert.equal(errorStorage[statusKey].single.message, "Error fetching list");
 }
 
-{
-  // arena-fight.js: fight-request construction, isolated from any UI.
-  const context = {
-    console,
-    URL,
-    Date,
-    Math,
-    chrome: { runtime: { id: "test" } }
-  };
-  context.window = context;
-  context.globalThis = context;
-  vm.createContext(context);
-  for (const file of ["score-model.js", "arena-core.js", "arena-fight.js"]) {
-    vm.runInContext(fs.readFileSync(path.join(rootDir, file), "utf8"), context, { filename: file });
-  }
-  const fight = context.GladiatusArenaFight;
-  assert.ok(fight, "GladiatusArenaFight should be defined");
-
-  const circusSource = "https://s47-en.gladiatus.gameforge.com/game/index.php?mod=arena&submod=serverArena&aType=3&sh=ABC";
-  const circusEndpoint = fight.fightEndpoint({ id: "219126", province: "306", language: "en", arenaKind: "team" }, circusSource);
-  assert.equal(circusEndpoint.path, "ajax.php");
-  assert.equal(circusEndpoint.opponentId, "219126");
-  assert.ok(circusEndpoint.data.includes("submod=doCombat"));
-  assert.ok(circusEndpoint.data.includes("aType=3"));
-  assert.ok(circusEndpoint.data.includes("opponentId=219126"));
-  assert.ok(circusEndpoint.data.includes("serverId=306"));
-  assert.ok(circusEndpoint.data.includes("country=en"));
-
-  const arenaEndpoint = fight.fightEndpoint(
-    { id: "555", province: "47", language: "en", arenaKind: "single" },
-    "https://s47-en.gladiatus.gameforge.com/game/index.php?mod=arena&submod=serverArena&aType=2&sh=ABC"
-  );
-  assert.ok(arenaEndpoint.data.includes("aType=2"));
-
-  const groupEndpoint = fight.fightEndpoint(
-    { id: "777", arenaKind: "team" },
-    "https://s47-en.gladiatus.gameforge.com/game/index.php?mod=arena&submod=grouparena&sh=ABC"
-  );
-  assert.equal(groupEndpoint.path, "ajax/doGroupFight.php");
-  assert.equal(groupEndpoint.data, "did=777");
-
-  const plainEndpoint = fight.fightEndpoint(
-    { id: "888", arenaKind: "single" },
-    "https://s47-en.gladiatus.gameforge.com/game/index.php?mod=arena&sh=ABC"
-  );
-  assert.equal(plainEndpoint.path, "ajax/doArenaFight.php");
-  assert.equal(plainEndpoint.data, "did=888");
-  assert.equal(fight.fightEndpoint({ id: "" }, circusSource), null);
-
-  // Best target comes from the stored result's bestName.
-  const result = {
-    arenaKind: "team",
-    sourceUrl: circusSource,
-    bestName: "AedileAulus",
-    opponents: [
-      { displayName: "Erudito", score: 50, opponent: { id: "31675", name: "Erudito", province: "306", language: "en", arenaKind: "team" } },
-      { displayName: "AedileAulus", score: 40, opponent: { id: "219126", name: "AedileAulus", province: "306", language: "en", arenaKind: "team" } }
-    ]
-  };
-  const target = fight.bestTargetFromResult(result);
-  assert.equal(target.name, "AedileAulus");
-  assert.equal(target.opponentId, "219126");
-  assert.ok(target.request.data.includes("opponentId=219126"));
-  assert.equal(fight.bestTargetFromResult({ opponents: [] }), null);
-  assert.equal(fight.bestTargetFromResult(null), null);
-
-  // buildFightRequest assembles the URL + headers and requires both tokens.
-  const built = fight.buildFightRequest(target, { origin: "https://s47-en.gladiatus.gameforge.com", sh: "ABC", csrfToken: "CSRF" });
-  assert.ok(built.url.startsWith("https://s47-en.gladiatus.gameforge.com/game/ajax.php?"));
-  assert.ok(built.url.includes("submod=doCombat"));
-  assert.ok(built.url.includes("&sh=ABC"));
-  assert.equal(built.options.method, "GET");
-  assert.equal(built.options.headers["X-CSRF-Token"], "CSRF");
-  assert.throws(() => fight.buildFightRequest(target, { origin: "https://x", sh: "ABC", csrfToken: "" }), /CSRF/);
-  assert.throws(() => fight.buildFightRequest(target, { origin: "https://x", sh: "", csrfToken: "C" }), /secure hash/);
-
-  // parseFightError surfaces the game's rejection message (e.g. cooldown) instead of faking success.
-  const creds = { origin: "https://s47-en.gladiatus.gameforge.com", sh: "ABC", csrfToken: "C" };
-  const errorBody = "document.getElementById('errorRow').style.display = 'block';\n"
-    + "document.getElementById('errorText').innerHTML = 'You can only challenge an opponent every 15 <a href=\"x\">(Centurion)</a> minutes.';";
-  const message = fight.parseFightError(errorBody);
-  assert.ok(/You can only challenge an opponent every 15/.test(message));
-  assert.doesNotMatch(message, /<a /);
-  assert.equal(fight.parseFightError("setData('<div>report</div>');"), "");
-
-  // combatReportUrlFromResponse follows the success redirect to the exact report.
-  const successBody = "document.location.href='index.php?mod=reports&submod=showCombatReport&t=2&reportId=31964876&sh=ZZ';";
-  const reportUrl = fight.combatReportUrlFromResponse(successBody, creds);
-  assert.ok(reportUrl.includes("submod=showCombatReport"));
-  assert.ok(reportUrl.includes("reportId=31964876"));
-  assert.ok(reportUrl.includes("t=2"));
-  assert.ok(reportUrl.startsWith("https://s47-en.gladiatus.gameforge.com/game/index.php?"));
-  assert.ok(fight.combatReportUrlFromResponse("document.location.href='index.php?submod=showCombatReport&reportId=99';", creds).includes("sh=ABC"));
-  assert.equal(fight.combatReportUrlFromResponse("document.location.href='index.php?mod=overview';", creds), "");
-  assert.equal(fight.combatReportUrlFromResponse("no redirect here", creds), "");
-}
-
 async function runAsyncTests() {
+  await runAuctionContentLifecycleTests();
   await runAuctionBackgroundScannerTests();
   await runBackgroundScannerTests();
 }

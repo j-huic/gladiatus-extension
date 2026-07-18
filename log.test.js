@@ -107,6 +107,43 @@ function loadModules(files, overrides = {}) {
   assert.ok(!record.fields.nested.url.includes("DEEP"), "nested url sh scrubbed");
 }
 
+// --- log-core: all credential forms are scrubbed and deep objects are cut off ---
+{
+  const { GladiatusLog } = loadModules(["log-core.js"]);
+  const captured = [];
+  GladiatusLog.setSinks([{ minLevel: "debug", write: (r) => captured.push(r) }]);
+  GladiatusLog.createLogger("safety").debug(
+    "https://x/?CsRf_ToKeN=ONE&SESSION=TWO",
+    {
+      access_token: "THREE",
+      nested: {
+        a: { b: { c: { d: { e: { f: { secret: "must-not-survive" } } } } } }
+      }
+    }
+  );
+  const serialized = JSON.stringify(captured[0]);
+  assert.ok(!serialized.includes("ONE"), "mixed-case CSRF query token scrubbed");
+  assert.ok(!serialized.includes("TWO"), "session query token scrubbed");
+  assert.ok(!serialized.includes("THREE"), "credential-like object field scrubbed");
+  assert.ok(!serialized.includes("must-not-survive"), "objects past maximum depth are not returned raw");
+  assert.ok(serialized.includes("[max-depth]"), "maximum-depth marker is emitted");
+}
+
+// --- log-core: shared sanitizer removes URL credentials and fragments when loaded ---
+{
+  const { GladiatusLog } = loadModules(["helper-security.js", "log-core.js"]);
+  const captured = [];
+  GladiatusLog.setSinks([{ minLevel: "debug", write: (r) => captured.push(r) }]);
+  GladiatusLog.createLogger("shared-safety").debug("request", {
+    url: "https://s1-en.gladiatus.gameforge.com/game/?mod=arena&sh=SECRET#private"
+  });
+  assert.equal(
+    captured[0].fields.url,
+    "https://s1-en.gladiatus.gameforge.com/game/?mod=arena",
+    "shared sanitizer strips credentials and fragments"
+  );
+}
+
 // --- log-core: serialize / toNdjsonLine round-trip ---
 {
   const { GladiatusLog } = loadModules(["log-core.js"]);
@@ -232,16 +269,20 @@ async function runAsyncTests() {
     const context = loadModules(["log-core.js", "log-setup.js"]);
     const LOG = context.GladiatusLog;
     const forwarded = [];
-    LOG.installFor("content", { send: (record) => forwarded.push(record) });
+    LOG.installFor("content", { diagnosticsEnabled: true, send: (record) => forwarded.push(record) });
     LOG.createLogger("c").debug("from-content");
     assert.equal(forwarded.length, 1);
     assert.equal(forwarded[0].msg, "from-content");
 
     const buffered = [];
-    LOG.installFor("background", { buffer: { append: (record) => buffered.push(record) } });
+    LOG.installFor("background", { diagnosticsEnabled: true, buffer: { append: (record) => buffered.push(record) } });
     LOG.createLogger("bg").info("from-bg");
     assert.equal(buffered.length, 1);
     assert.equal(buffered[0].msg, "from-bg");
+
+    LOG.installFor("content", { diagnosticsEnabled: false, send: (record) => forwarded.push(record) });
+    LOG.createLogger("quiet").debug("not-forwarded");
+    assert.equal(forwarded.length, 1, "disabled diagnostics do not forward records");
   }
 }
 

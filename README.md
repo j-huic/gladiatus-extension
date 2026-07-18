@@ -1,10 +1,16 @@
-# Gladiatus Helper
+# Gladiatus Helper (Unofficial)
 
-A small local Chrome extension that adds a sort bar/scanner popup to the Gladiatus auction house and a basic opponent scanner for arena pages.
+A local Chrome MV3 extension with three independently optional Gladiatus helpers:
+
+- auction page sorting, ranking rules, and multi-category scans;
+- read-only arena opponent insights, profile scans, and simulations;
+- guild-market price suggestions with an explicit **Apply suggested price** action.
 
 It reads the visible auction item tooltip data from `data-tooltip`, parses stat lines such as `Strength +11% (+5)` or `Damage 50 - 62`, and reorders the current auction page in the browser. It works across auction item types because the parser reads the item tooltip data for each visible listing instead of assuming weapons, shields, helmets, or any other category.
 
-It does not bid, buy, attack, call non-game APIs, or send data anywhere. The popup scanner only requests Gladiatus pages using the active browser session and caches auction scans in local extension storage.
+The extension does not bid, buy, fight, submit market listings, or contact developer-owned or unrelated third-party services. Enabled scanners do request Gladiatus Gameforge pages with the active browser session. Settings, rules, and scan caches remain in local extension storage. Stored and exported records remove known session and CSRF parameters.
+
+On a fresh installation all three features are off until they are selected in onboarding. They can be enabled, configured, or disabled independently from the popup. Disabling a feature keeps its settings and cached data until the user clears them.
 
 ## Load In Chrome
 
@@ -12,8 +18,8 @@ It does not bid, buy, attack, call non-game APIs, or send data anywhere. The pop
 2. Enable `Developer mode`.
 3. Click `Load unpacked`.
 4. Select this folder: `/Users/jankohuic/dev/gladiatus`.
-5. Open the Gladiatus auction house and use the injected `Auction sorter` bar, or open the extension popup and click `Scan auction`.
-6. Open a Gladiatus arena opponent list and use the popup `Scan opponents` button to fetch visible opponent profiles and annotate their rows with primary stat totals.
+5. Open the popup, choose the helpers you want, and finish onboarding.
+6. Open an auction, arena, or guild-market page and use its enabled helper.
 
 ## Notes
 
@@ -22,9 +28,9 @@ It does not bid, buy, attack, call non-game APIs, or send data anywhere. The pop
 - Arena profile fetching is handled by the extension background worker because opponents may be on another Gladiatus province/subdomain.
 - The scanner attempts both auction groups from one button by using the auction-page links for Gladiator necessities and Mercenary necessities.
 - A successful auction scan replaces the current cached item list. The previous scan is compacted into a bounded local archive in extension storage for later debugging/comparison.
-- The popup has `Items` and `Filters` pages. Use `Filters` to create custom score filters without writing formulas.
+- The auction popup separates scan results from `Ranking rules`; ranking rules define scoring, while page filters narrow visible items.
 - Popup tabs group results into Weapons, Armor, Food, Upgrades, and Mercenaries. Each tab keeps its own selected sort preset.
-- Popup tab and preset clicks also apply the same sort to the visible auction page when the active tab is a Gladiatus auction page.
+- Browsing cached results never changes the live auction page. Applying a popup ranking to the page is a separate, optional action.
 - Popup item rows show thumbnails when the game exposes an image URL or inline icon background style in the auction markup.
 - Default popup sorting is average weapon damage, food healing per gold, armor main-character score, upgrade damage, and mercenary agility.
 - The in-page auction sorter uses those same defaults for each auction item type, then remembers manual sort changes per item type.
@@ -38,6 +44,7 @@ It does not bid, buy, attack, call non-game APIs, or send data anywhere. The pop
 - `High first` is the default for stats. `Immediate gold` defaults to low first.
 - The selected sort stat and sort direction are persisted across auction filter reloads.
 - If you change files while the extension is already loaded, click the extension reload button on `chrome://extensions`, then refresh the Gladiatus page.
+- Diagnostics are off by default. When enabled, debug records can be exported explicitly from Settings and contain redacted Gameforge URLs.
 
 ## DevTools API
 
@@ -55,13 +62,20 @@ await window.GladiatusAuctionCore.scanAllAuctionItems()
 window.GladiatusAuctionCore.parseStats(["Healing +87,+11", "Intelligence +21"])
 ```
 
-The popup uses the same page-level API through a content-script bridge. The schema owns stat keys, display labels, stable auction category ids, and storage keys. The core API is loaded in Chrome's MAIN world so DevTools and the extension exercise the same parser and scanner code. The scan API first tries normal page fetches and falls back to hidden same-origin iframe/form loads when fetches are blocked.
+The schema owns stat keys, display labels, stable auction category ids, and storage keys. The same core parser contract is loaded in the page, isolated content-script, popup, and background contexts; full popup scans run through the gated background worker. The DevTools scan API can still run directly in the page, first trying normal page fetches and falling back to hidden same-origin iframe/form loads when fetches are blocked.
 
 ## Architecture Checks
 
 ```sh
-for file in auction-schema.js score-model.js auction-core.js auction-model.js auction-content.js arena-core.js arena-content.js background.js popup.js popup/*.js architecture.test.js; do node --check "$file"; done
+for file in *.js popup/*.js sim-lab/*.js; do node --check "$file"; done
+node helper-settings.test.js
+node feature-runtime.test.js
+node background.test.js
+node arena-lifecycle.test.js
+node tooltip-parser.test.js
+node guild-market.test.js
 node architecture.test.js
+node log.test.js
 ```
 
 ## Adding Presets And Filters
