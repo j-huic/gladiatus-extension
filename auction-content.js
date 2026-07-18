@@ -13,22 +13,39 @@
 
   if (!isAuctionPageUrl(window.location.href)) return;
 
+  if (window.GladiatusAuctionFeature?.version === CONTENT_VERSION
+    && window.GladiatusAuctionFeature?.ready !== false) return;
+
   const missingDependencies = getMissingDependencies();
   if (missingDependencies.length) {
-    registerMissingDependencyDiagnostics(missingDependencies);
-    requestDependencyRepair(missingDependencies);
+    let active = false;
+    window.GladiatusAuctionFeature = {
+      version: CONTENT_VERSION,
+      ready: false,
+      async start(settings = {}) {
+        if (!shouldRunAuctionController(settings)) return this.stop();
+        active = true;
+        registerMissingDependencyDiagnostics(missingDependencies);
+        requestDependencyRepair(missingDependencies);
+      },
+      async update(settings = {}) {
+        if (shouldRunAuctionController(settings)) return this.start(settings);
+        return this.stop();
+      },
+      async stop() {
+        active = false;
+        clearMissingDependencyDiagnostics();
+      },
+      getStatus() {
+        return { active, ready: false, missingDependencies: [...missingDependencies] };
+      }
+    };
     return;
   }
   clearMissingDependencyDiagnostics();
 
   const { SCHEMA, MODEL, CORE } = getDependencies();
 
-  if (window.__GladiatusAuctionContentLoaded
-    && window.__GladiatusAuctionContentVersion === CONTENT_VERSION
-    && typeof window.__GladiatusAuctionBoot === "function") {
-    window.__GladiatusAuctionBoot();
-    return;
-  }
   window.__GladiatusAuctionContentLoaded = true;
   window.__GladiatusAuctionContentVersion = CONTENT_VERSION;
 
@@ -41,6 +58,10 @@
     } catch {
       return false;
     }
+  }
+
+  function shouldRunAuctionController(settings) {
+    return Boolean(settings?.enabled && (settings?.pageSorter || settings?.fullScan));
   }
 
   function getMissingDependencies() {
@@ -133,8 +154,10 @@
   const PAGE_BRIDGE_REQUEST_SOURCE = CORE.constants.pageBridgeRequestSource || "glad-ah-extension";
   const PAGE_BRIDGE_RESPONSE_SOURCE = CORE.constants.pageBridgeResponseSource || "glad-ah-page";
   const PAGE_SCHEMA_SCRIPT_ID = `glad-ah-page-schema-${CORE.version || CONTENT_VERSION}`;
+  const PAGE_TOOLTIP_SCRIPT_ID = `glad-ah-page-tooltip-${CORE.version || CONTENT_VERSION}`;
   const PAGE_CORE_SCRIPT_ID = `glad-ah-page-core-${CORE.version || CONTENT_VERSION}`;
 
+  let persistedSortState = null;
   const initialState = readSortState();
   let selectedSort = initialState.selectedSort;
   let descending = initialState.descending;
@@ -144,6 +167,12 @@
   let refreshTimer = 0;
   let lastItemSetSignature = "";
   let pageCoreLoadPromise = null;
+  let active = false;
+  let activeSettings = null;
+  let initialized = false;
+  let operationGeneration = 0;
+  let nativeTableSnapshot = null;
+  let pageRankingApplied = false;
 
   function makeBaseStatSortOptions() {
     const keys = [
@@ -223,6 +252,7 @@
     if (pageCoreLoadPromise) return pageCoreLoadPromise;
 
     pageCoreLoadPromise = injectPageScript("auction-schema.js", PAGE_SCHEMA_SCRIPT_ID)
+      .then(() => injectPageScript("tooltip-parser.js", PAGE_TOOLTIP_SCRIPT_ID))
       .then(() => injectPageScript("auction-core.js", PAGE_CORE_SCRIPT_ID, { gladAuctionPageBridge: "1" }));
 
     return pageCoreLoadPromise;
@@ -271,11 +301,13 @@
   }
 
   async function scanAuctionInBackground() {
+    const generation = operationGeneration;
     const request = CORE.createAuctionScanRequest(document);
     const response = await sendRuntimeMessage({
       type: "GLAD_AUCTION_FORCE_SCAN",
       request
     });
+    if (!active || generation !== operationGeneration) throw new Error("Auction feature is disabled.");
     if (!response?.ok) throw new Error(response?.error || "Could not scan auction categories.");
     return response.result;
   }
@@ -301,7 +333,7 @@
     };
 
     try {
-      const saved = JSON.parse(window.localStorage.getItem(STORAGE_KEY) || "null");
+      const saved = persistedSortState;
       if (!saved || typeof saved !== "object") return defaults;
       const filterValuesByView = saved.filterByView && typeof saved.filterByView === "object" ? saved.filterByView : {};
 
@@ -323,6 +355,35 @@
     }
   }
 
+  async function loadSortState() {
+    if (typeof chrome === "undefined" || !chrome.storage?.local) {
+      persistedSortState = null;
+      return;
+    }
+
+    const stored = await chrome.storage.local.get(STORAGE_KEY);
+    if (stored[STORAGE_KEY] && typeof stored[STORAGE_KEY] === "object") {
+      persistedSortState = stored[STORAGE_KEY];
+      return;
+    }
+
+    let legacy = null;
+    try {
+      legacy = JSON.parse(window.localStorage.getItem(STORAGE_KEY) || "null");
+    } catch {
+      legacy = null;
+    }
+    persistedSortState = legacy && typeof legacy === "object" ? legacy : null;
+    if (!persistedSortState) return;
+
+    await chrome.storage.local.set({ [STORAGE_KEY]: persistedSortState });
+    try {
+      window.localStorage.removeItem(STORAGE_KEY);
+    } catch {
+      // The migration succeeded even if the website blocks localStorage cleanup.
+    }
+  }
+
   function getContextDefaultSortId() {
     return MODEL.defaultPresetForItemType(getCurrentItemType());
   }
@@ -341,20 +402,17 @@
   }
 
   function saveSortState() {
-    try {
-      const saved = JSON.parse(window.localStorage.getItem(STORAGE_KEY) || "null") || {};
-      const byItemType = saved && typeof saved === "object" && saved.byItemType && typeof saved.byItemType === "object"
-        ? saved.byItemType
-        : {};
-      window.localStorage.setItem(STORAGE_KEY, JSON.stringify({
-        byItemType: {
-          ...byItemType,
-          [getSortContextKey()]: { selectedSort, descending }
-        }
-      }));
-    } catch {
-      // Sorting should still work if local storage is blocked.
-    }
+    const byItemType = persistedSortState?.byItemType && typeof persistedSortState.byItemType === "object"
+      ? persistedSortState.byItemType
+      : {};
+    persistedSortState = {
+      byItemType: {
+        ...byItemType,
+        [getSortContextKey()]: { selectedSort, descending }
+      }
+    };
+    if (!active || typeof chrome === "undefined" || !chrome.storage?.local) return Promise.resolve();
+    return chrome.storage.local.set({ [STORAGE_KEY]: persistedSortState });
   }
 
   function getFilterValues(viewId) {
@@ -385,11 +443,18 @@
     }
 
     const result = await chrome.storage.local.get(FILTER_VALUES_STORAGE_KEY);
-    return MODEL.normalizeAllFilterValues(result[FILTER_VALUES_STORAGE_KEY] || legacy);
+    if (result[FILTER_VALUES_STORAGE_KEY]) {
+      return MODEL.normalizeAllFilterValues(result[FILTER_VALUES_STORAGE_KEY]);
+    }
+    const migrated = MODEL.normalizeAllFilterValues(legacy);
+    if (Object.keys(migrated).length) {
+      await chrome.storage.local.set({ [FILTER_VALUES_STORAGE_KEY]: migrated });
+    }
+    return migrated;
   }
 
   async function saveSharedFilterValues() {
-    if (typeof chrome === "undefined" || !chrome.storage?.local) return;
+    if (!active || typeof chrome === "undefined" || !chrome.storage?.local) return;
     await chrome.storage.local.set({ [FILTER_VALUES_STORAGE_KEY]: MODEL.normalizeAllFilterValues(filterValuesByView) });
   }
 
@@ -432,10 +497,6 @@
         const cell = form.closest("td");
         if (!cell || seenCells.has(cell)) return null;
         seenCells.add(cell);
-
-        if (!cell.dataset.gladAhOriginalIndex) {
-          cell.dataset.gladAhOriginalIndex = String(index);
-        }
 
         const parsedItem = CORE.parseAuctionItemFromForm(form, index, meta);
         if (!parsedItem) return null;
@@ -493,6 +554,7 @@
   }
 
   function sortItems() {
+    if (!active || !activeSettings?.pageSorter) return;
     refreshSortContext();
 
     const table = getAuctionTable();
@@ -501,6 +563,12 @@
     const tbody = table.tBodies[0];
     const items = collectItems();
     if (!items.length) return;
+    for (const item of items) {
+      if (!item.cell.dataset.gladAhOriginalIndex) {
+        item.cell.dataset.gladAhOriginalIndex = String(item.originalIndex);
+      }
+    }
+    captureNativeTableSnapshot(tbody, items);
     lastItemSetSignature = getItemSetSignature();
 
     const option = getSelectedOption();
@@ -538,6 +606,7 @@
     clearBadges(items);
     updateBadges(visibleItems, option);
     updateItemCount(visibleItems.length, items.length);
+    setPageRankingStatus("Ranking applied to the current page.");
   }
 
   function removeRowsContaining(cells, tbody) {
@@ -555,6 +624,7 @@
       item.cell.classList.remove("glad-ah-filtered-hidden");
       if (index % 2 === 0) {
         row = document.createElement("tr");
+        row.className = "glad-ah-generated-row";
         tbody.append(row);
       }
       row.append(item.cell);
@@ -565,7 +635,7 @@
     if (!items.length) return;
 
     const row = document.createElement("tr");
-    row.className = "glad-ah-filter-stash";
+    row.className = "glad-ah-filter-stash glad-ah-generated-row";
     tbody.append(row);
 
     items.forEach((item) => {
@@ -577,15 +647,18 @@
   function clearBadges(items) {
     items.forEach((item) => {
       item.cell.querySelectorAll(`.${BADGE_CLASS}`).forEach((badge) => badge.remove());
+      item.cell.querySelectorAll(".glad-ah-score-host").forEach((host) => host.classList.remove("glad-ah-score-host"));
     });
   }
 
   function updateBadges(items, option) {
+    if (!activeSettings?.scoreBadges) return;
     items.forEach((item) => {
       if (selectedSort === "original") return;
 
       const target = item.cell.querySelector(".auction_item_div");
       if (!target) return;
+      target.classList.add("glad-ah-score-host");
 
       const score = option.get(item);
       const badge = document.createElement("div");
@@ -647,7 +720,7 @@
     return groups.entries();
   }
 
-  function applySortSelection(sortId) {
+  function applySortSelection(sortId, options = {}) {
     const option = getSortOptions().find((candidate) => candidate.id === sortId && isSortOptionVisibleForCurrentView(candidate));
     if (!option || !isSortOptionVisibleForCurrentView(option)) return;
 
@@ -660,7 +733,20 @@
     saveSortState();
     syncSortSelect();
     updateOrderButton();
+    pageRankingApplied = false;
+    setPageRankingStatus("Ranking choices changed. Apply when ready.");
+    if (options.apply === true) applyRankingToCurrentPage();
+  }
+
+  function applyRankingToCurrentPage() {
+    if (!active || !activeSettings?.pageSorter) return;
+    pageRankingApplied = true;
     sortItems();
+  }
+
+  function setPageRankingStatus(text) {
+    const status = document.querySelector(`#${UI_ID} .glad-ah-page-status`);
+    if (status) status.textContent = text;
   }
 
   function syncSortSelect() {
@@ -687,7 +773,7 @@
 
     const title = document.createElement("span");
     title.className = "glad-ah-filter-title";
-    title.textContent = "Filters";
+    title.textContent = "Ranking rules";
     container.append(title);
 
     for (const filter of controls) {
@@ -707,7 +793,8 @@
       input.addEventListener("input", () => {
         setFilterValue(view.id, filter.id, input.value);
         saveSharedFilterValues().catch(() => {});
-        sortItems();
+        pageRankingApplied = false;
+        setPageRankingStatus("Ranking choices changed. Apply when ready.");
       });
 
       label.append(text, input);
@@ -723,7 +810,7 @@
   }
 
   function ensureUi() {
-    if (!isAuctionPage() || document.getElementById(UI_ID)) return;
+    if (!active || !activeSettings?.pageSorter || !isAuctionPage() || document.getElementById(UI_ID)) return;
 
     const table = getAuctionTable();
     const anchor = table || getAuctionFilterForm() || document.querySelector("#content");
@@ -733,7 +820,7 @@
     panel.id = UI_ID;
 
     const title = document.createElement("strong");
-    title.textContent = "Auction sorter";
+    title.textContent = "Current-page ranking";
 
     const label = document.createElement("label");
     label.htmlFor = "glad-ah-sort-field";
@@ -749,22 +836,27 @@
       descending = !descending;
       saveSortState();
       updateOrderButton();
-      sortItems();
+      pageRankingApplied = false;
+      setPageRankingStatus("Ranking choices changed. Apply when ready.");
     });
 
     const applyButton = document.createElement("button");
     applyButton.type = "button";
-    applyButton.textContent = "Apply";
-    applyButton.addEventListener("click", sortItems);
+    applyButton.textContent = "Apply ranking to current page";
+    applyButton.addEventListener("click", applyRankingToCurrentPage);
+
+    const pageStatus = document.createElement("span");
+    pageStatus.className = "glad-ah-page-status";
+    pageStatus.setAttribute("aria-live", "polite");
+    pageStatus.textContent = "The native auction order is unchanged.";
 
     const count = document.createElement("span");
     count.className = "glad-ah-count";
     count.textContent = `${collectItems().length} items`;
 
-    panel.append(title, label, select, orderButton, filterControls, applyButton, count);
+    panel.append(title, label, select, orderButton, filterControls, applyButton, pageStatus, count);
     insertPanel(panel, table, anchor);
     updateOrderButton();
-    sortItems();
   }
 
   function insertPanel(panel, table, anchor) {
@@ -776,7 +868,7 @@
       return;
     }
 
-    const auctionTableContainer = table.closest("#auction_table");
+    const auctionTableContainer = table?.closest("#auction_table");
     if (auctionTableContainer) {
       auctionTableContainer.before(panel);
       return;
@@ -791,6 +883,7 @@
   }
 
   function boot() {
+    if (!active || !activeSettings?.pageSorter) return;
     window.clearTimeout(bootTimer);
     bootTimer = window.setTimeout(() => {
       ensureUi();
@@ -799,6 +892,7 @@
   window.__GladiatusAuctionBoot = boot;
 
   function scheduleRefresh() {
+    if (!active || !activeSettings?.pageSorter || !pageRankingApplied) return;
     if (!document.getElementById(UI_ID)) {
       boot();
       return;
@@ -806,110 +900,232 @@
 
     const signature = getItemSetSignature();
     if (!signature || signature === lastItemSetSignature) return;
-
-    window.clearTimeout(refreshTimer);
-    refreshTimer = window.setTimeout(sortItems, 150);
+    refreshSortContext();
+    pageRankingApplied = false;
+    lastItemSetSignature = signature;
+    updateItemCount(collectItems().length);
+    setPageRankingStatus("Auction items changed. Apply ranking to this page when ready.");
   }
 
-  async function initialize() {
+  async function initialize(generation) {
+    await loadSortState();
     await loadCustomDefinitions();
     filterValuesByView = await loadSharedFilterValues();
-    await saveSharedFilterValues();
+    if (!active || generation !== operationGeneration) return;
     refreshStateFromStorage();
 
     if (typeof chrome !== "undefined" && chrome.storage?.onChanged) {
-      chrome.storage.onChanged.addListener((changes, areaName) => {
-        if (areaName !== "local") return;
-
-        if (changes[MODEL.customDefinitionsStorageKey]) {
-          customDefinitions = MODEL.normalizeCustomDefinitions(changes[MODEL.customDefinitionsStorageKey].newValue);
-          refreshStateFromStorage();
-          renderSortSelectOptions();
-          syncSortSelect();
-          updateOrderButton();
-          renderFilterControls();
-          sortItems();
-        }
-
-        if (changes[FILTER_VALUES_STORAGE_KEY]) {
-          const nextValues = MODEL.normalizeAllFilterValues(changes[FILTER_VALUES_STORAGE_KEY].newValue);
-          if (MODEL.filterValuesEqual(filterValuesByView, nextValues)) return;
-
-          filterValuesByView = nextValues;
-          renderFilterControls();
-          sortItems();
-        }
-      });
+      chrome.storage.onChanged.addListener(handleAuctionStorageChanged);
     }
 
-    if (document.readyState === "loading") {
+    if (activeSettings?.pageSorter && document.readyState === "loading") {
       document.addEventListener("DOMContentLoaded", boot, { once: true });
-    } else {
+    } else if (activeSettings?.pageSorter) {
       boot();
     }
 
-    observer.observe(document.documentElement, { childList: true, subtree: true });
+    if (activeSettings?.pageSorter) {
+      observer.observe(document.documentElement, { childList: true, subtree: true });
+    }
+    initialized = true;
   }
 
-  if (typeof chrome !== "undefined" && chrome.runtime?.onMessage) {
-    chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
-      if (isMessageType(message, MESSAGE_TYPES.applySort)) {
-        const option = getSortOptions().find((candidate) => candidate.id === message.sortId && isSortOptionVisibleForCurrentView(candidate));
-        if (!option) {
-          sendResponse({ ok: false, error: "Unknown auction sort preset." });
-          return false;
-        }
+  function handleAuctionStorageChanged(changes, areaName) {
+    if (!active || areaName !== "local") return;
 
-        if (message.viewId && message.filterValues) {
-          setFilterValues(message.viewId, message.filterValues);
-          saveSharedFilterValues().catch(() => {});
-        }
-        applySortSelection(option.id);
-        renderFilterControls();
-        sendResponse({ ok: true });
+    if (changes[MODEL.customDefinitionsStorageKey]) {
+      customDefinitions = MODEL.normalizeCustomDefinitions(changes[MODEL.customDefinitionsStorageKey].newValue);
+      refreshStateFromStorage();
+      renderSortSelectOptions();
+      syncSortSelect();
+      updateOrderButton();
+      renderFilterControls();
+      pageRankingApplied = false;
+      setPageRankingStatus("Ranking rules changed. Apply when ready.");
+    }
+
+    if (changes[FILTER_VALUES_STORAGE_KEY]) {
+      const nextValues = MODEL.normalizeAllFilterValues(changes[FILTER_VALUES_STORAGE_KEY].newValue);
+      if (MODEL.filterValuesEqual(filterValuesByView, nextValues)) return;
+
+      filterValuesByView = nextValues;
+      renderFilterControls();
+      pageRankingApplied = false;
+      setPageRankingStatus("Ranking rules changed. Apply when ready.");
+    }
+  }
+
+  function handleRuntimeMessage(message, _sender, sendResponse) {
+    if (!isAuctionMessage(message) && !isMessageType(message, MESSAGE_TYPES.repair)) return false;
+    if (!active) {
+      sendResponse({ ok: false, code: "FEATURE_DISABLED", error: "Auction feature is disabled." });
+      return false;
+    }
+
+    if (isMessageType(message, MESSAGE_TYPES.applySort)) {
+      if (!activeSettings?.pageSorter || !activeSettings?.applyRankingToPage) {
+        sendResponse({ ok: false, code: "FEATURE_DISABLED", error: "Applying popup rankings to the page is disabled." });
         return false;
       }
 
-      if (isMessageType(message, MESSAGE_TYPES.customDefinitionsUpdated)) {
-        customDefinitions = MODEL.normalizeCustomDefinitions(message.definitions);
-        refreshStateFromStorage();
-        renderSortSelectOptions();
-        syncSortSelect();
-        updateOrderButton();
-        renderFilterControls();
-        sortItems();
-        sendResponse({ ok: true });
+      const option = getSortOptions().find((candidate) => candidate.id === message.sortId && isSortOptionVisibleForCurrentView(candidate));
+      if (!option) {
+        sendResponse({ ok: false, error: "Unknown auction sort preset." });
         return false;
       }
 
-      if (isMessageType(message, MESSAGE_TYPES.boot)) {
-        boot();
-        sendResponse({
-          ok: true,
-          isAuctionPage: isAuctionPage(),
-          hasPanel: Boolean(document.getElementById(UI_ID)),
-          itemForms: document.querySelectorAll(CARD_SELECTOR).length,
-          hasFilterForm: Boolean(getAuctionFilterForm())
-        });
-        return false;
+      if (message.viewId && message.filterValues) {
+        setFilterValues(message.viewId, message.filterValues);
+        saveSharedFilterValues().catch(() => {});
       }
+      applySortSelection(option.id);
+      renderFilterControls();
+      applyRankingToCurrentPage();
+      sendResponse({ ok: true });
+      return false;
+    }
 
-      if (!isMessageType(message, MESSAGE_TYPES.scanAll)) return false;
+    if (isMessageType(message, MESSAGE_TYPES.customDefinitionsUpdated)) {
+      customDefinitions = MODEL.normalizeCustomDefinitions(message.definitions);
+      refreshStateFromStorage();
+      renderSortSelectOptions();
+      syncSortSelect();
+      updateOrderButton();
+      renderFilterControls();
+      pageRankingApplied = false;
+      setPageRankingStatus("Ranking rules changed. Apply when ready.");
+      sendResponse({ ok: true });
+      return false;
+    }
 
-      scanAuctionInBackground()
-        .then((result) => sendResponse({ ok: true, result }))
-        .catch((error) => sendResponse({ ok: false, error: error.message || String(error) }));
+    if (isMessageType(message, MESSAGE_TYPES.boot)) {
+      boot();
+      sendResponse({
+        ok: true,
+        isAuctionPage: isAuctionPage(),
+        hasPanel: Boolean(document.getElementById(UI_ID)),
+        itemForms: document.querySelectorAll(CARD_SELECTOR).length,
+        hasFilterForm: Boolean(getAuctionFilterForm())
+      });
+      return false;
+    }
 
-      return true;
-    });
+    if (!isMessageType(message, MESSAGE_TYPES.scanAll)) return false;
+    if (!activeSettings?.fullScan) {
+      sendResponse({ ok: false, code: "FEATURE_DISABLED", error: "Full auction scanning is disabled." });
+      return false;
+    }
+
+    scanAuctionInBackground()
+      .then((result) => sendResponse({ ok: true, result }))
+      .catch((error) => sendResponse({ ok: false, error: error.message || String(error) }));
+
+    return true;
   }
 
   const observer = new MutationObserver(() => {
     scheduleRefresh();
   });
 
-  initialize().catch(() => {
-    boot();
-    observer.observe(document.documentElement, { childList: true, subtree: true });
-  });
+  function captureNativeTableSnapshot(tbody, items) {
+    if (nativeTableSnapshot?.tbody === tbody) return;
+    nativeTableSnapshot = {
+      tbody,
+      rows: Array.from(tbody.rows).map((row) => ({ row, cells: Array.from(row.cells) })),
+      itemCells: items.map((item) => item.cell)
+    };
+  }
+
+  function restoreNativeTable() {
+    const snapshot = nativeTableSnapshot;
+    nativeTableSnapshot = null;
+    if (!snapshot?.tbody?.isConnected) {
+      document.querySelectorAll(`.${BADGE_CLASS}`).forEach((badge) => badge.remove());
+      document.querySelectorAll(".glad-ah-score-host").forEach((host) => host.classList.remove("glad-ah-score-host"));
+      document.querySelectorAll(".glad-ah-filtered-hidden").forEach((cell) => cell.classList.remove("glad-ah-filtered-hidden"));
+      document.querySelectorAll("[data-glad-ah-original-index]").forEach((cell) => delete cell.dataset.gladAhOriginalIndex);
+      return;
+    }
+
+    snapshot.tbody.querySelectorAll(".glad-ah-generated-row").forEach((row) => row.remove());
+    for (const entry of snapshot.rows) {
+      for (const cell of entry.cells) entry.row.append(cell);
+      snapshot.tbody.append(entry.row);
+    }
+    for (const cell of snapshot.itemCells) {
+      cell.classList.remove("glad-ah-filtered-hidden");
+      delete cell.dataset.gladAhOriginalIndex;
+    }
+    document.querySelectorAll(`.${BADGE_CLASS}`).forEach((badge) => badge.remove());
+    document.querySelectorAll(".glad-ah-score-host").forEach((host) => host.classList.remove("glad-ah-score-host"));
+    document.querySelectorAll("[data-glad-ah-original-index]").forEach((cell) => delete cell.dataset.gladAhOriginalIndex);
+  }
+
+  async function start(settings = {}) {
+    if (!shouldRunAuctionController(settings)) return stop();
+    if (active) return update(settings);
+
+    active = true;
+    activeSettings = { ...settings };
+    operationGeneration += 1;
+    const generation = operationGeneration;
+    if (typeof chrome !== "undefined" && chrome.runtime?.onMessage) {
+      chrome.runtime.onMessage.addListener(handleRuntimeMessage);
+    }
+
+    if (!activeSettings?.pageSorter) {
+      initialized = true;
+      return;
+    }
+
+    try {
+      await initialize(generation);
+    } catch {
+      if (active && generation === operationGeneration && activeSettings?.pageSorter) boot();
+    }
+  }
+
+  async function update(settings = {}) {
+    await stop();
+    if (shouldRunAuctionController(settings)) await start(settings);
+  }
+
+  async function stop() {
+    active = false;
+    activeSettings = null;
+    initialized = false;
+    operationGeneration += 1;
+    window.clearTimeout(bootTimer);
+    window.clearTimeout(refreshTimer);
+    observer.disconnect();
+    document.removeEventListener("DOMContentLoaded", boot);
+    document.getElementById(UI_ID)?.remove();
+    restoreNativeTable();
+    lastItemSetSignature = "";
+    pageRankingApplied = false;
+
+    if (typeof chrome !== "undefined" && chrome.runtime?.onMessage) {
+      chrome.runtime.onMessage.removeListener(handleRuntimeMessage);
+    }
+    if (typeof chrome !== "undefined" && chrome.storage?.onChanged) {
+      chrome.storage.onChanged.removeListener(handleAuctionStorageChanged);
+    }
+  }
+
+  window.__GladiatusAuctionBoot = boot;
+  window.GladiatusAuctionFeature = {
+    version: CONTENT_VERSION,
+    ready: true,
+    start,
+    update,
+    stop,
+    getStatus() {
+      return {
+        active,
+        initialized,
+        isAuctionPage: isAuctionPage(),
+        hasPanel: Boolean(document.getElementById(UI_ID))
+      };
+    }
+  };
 })();

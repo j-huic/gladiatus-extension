@@ -43,8 +43,12 @@
   opacity: 0.55;
 }
 
-#glad-ah-sorter .glad-ah-count {
+#glad-ah-sorter .glad-ah-count,
+#glad-ah-sorter .glad-ah-page-status {
   color: #c8aa74;
+}
+
+#glad-ah-sorter .glad-ah-count {
   margin-left: auto;
 }
 
@@ -70,7 +74,7 @@
   display: none !important;
 }
 
-.auction_item_div {
+.glad-ah-score-host {
   position: relative;
 }
 
@@ -272,65 +276,4 @@ tr.glad-arena-best > td {
 
 .glad-arena-passive-status-error .glad-arena-passive-status-badge::before {
   background: #d5685d;
-}
-
-.glad-arena-header-button {
-  background: #3b2817;
-  border: 1px solid #7f9654;
-  border-radius: 3px;
-  box-sizing: border-box;
-  color: #d9e7a4;
-  cursor: pointer;
-  float: left;
-  font-size: 11px;
-  height: 20px;
-  line-height: 18px;
-  margin: 2px 5px 0;
-  padding: 0 4px;
-}
-
-.glad-arena-header-button:hover {
-  background: #4a3420;
-  border-color: #8fb35a;
-}
-
-.glad-arena-header-button-busy {
-  opacity: 0.6;
-  pointer-events: none;
-}
-
-.glad-arena-header-button-error {
-  border-color: #9d3f32;
-  color: #ffb4a8;
-}
-
-.glad-arena-fight-button {
-  background: #3b2817;
-  border: 1px solid #7f9654;
-  border-radius: 3px;
-  color: #d9e7a4;
-  cursor: pointer;
-  font-size: 11px;
-  font-weight: 700;
-  grid-column: 1 / -1;
-  grid-row: 3;
-  justify-self: start;
-  line-height: 1.1;
-  margin-top: 2px;
-  padding: 4px 8px;
-}
-
-.glad-arena-fight-button:hover:not(:disabled) {
-  background: #4a3420;
-  border-color: #8fb35a;
-}
-
-.glad-arena-fight-button:disabled {
-  cursor: default;
-  opacity: 0.85;
-}
-
-.glad-arena-fight-button-error {
-  border-color: #9d3f32;
-  color: #ffb4a8;
 }

@@ -1,15 +1,42 @@
 (() => {
+  const CONTENT_VERSION = "arena-content-v3";
   const MESSAGE_TYPES = {
     scanOpponents: "GLAD_ARENA_SCAN_OPPONENTS",
     boot: "GLAD_ARENA_BOOT_V2",
-    status: "GLAD_ARENA_CONTENT_STATUS_V2"
+    status: "GLAD_ARENA_CONTENT_STATUS_V2",
+    refreshSelfProfile: "GLAD_ARENA_REFRESH_SELF_PROFILE"
   };
   const ARENA = window.GladiatusArenaCore;
   const SCANNER = window.GladiatusArenaScanner;
   const devLogger = window.GladiatusLog ? window.GladiatusLog.createLogger("arena-content") : null;
 
+  if (window.GladiatusArenaFeature?.version === CONTENT_VERSION
+    && window.GladiatusArenaFeature?.ready !== false) return;
+
   if (!ARENA || !SCANNER) {
-    registerMissingArenaDependencyDiagnostic();
+    let active = false;
+    window.GladiatusArenaFeature = {
+      version: CONTENT_VERSION,
+      ready: false,
+      async start(settings = {}) {
+        if (!shouldRunArenaController(settings)) return this.stop();
+        active = true;
+        registerMissingArenaDependencyDiagnostic();
+      },
+      async update(settings = {}) {
+        if (shouldRunArenaController(settings)) return this.start(settings);
+        return this.stop();
+      },
+      async stop() {
+        active = false;
+        const listener = window.__GladiatusArenaMissingDependencyListener;
+        if (listener && typeof chrome !== "undefined" && chrome.runtime?.onMessage) {
+          chrome.runtime.onMessage.removeListener(listener);
+        }
+        delete window.__GladiatusArenaMissingDependencyListener;
+      },
+      getStatus() { return { active, ready: false }; }
+    };
     return;
   }
 
@@ -18,10 +45,23 @@
     delete window.__GladiatusArenaMissingDependencyListener;
   }
 
-  if (window.__GladiatusArenaContentBootstrapped) {
-    window.__GladiatusArenaContentBoot?.();
-    return;
+  function shouldRunArenaController(settings) {
+    return Boolean(settings?.enabled
+      && (settings?.annotations || settings?.manualScan)
+      && isCurrentArenaPage());
   }
+
+  function isCurrentArenaPage() {
+    try {
+      const parsed = new URL(window.location.href);
+      return parsed.hostname.endsWith(".gladiatus.gameforge.com")
+        && parsed.pathname.endsWith("/game/index.php")
+        && parsed.searchParams.get("mod") === "arena";
+    } catch {
+      return false;
+    }
+  }
+
   window.__GladiatusArenaContentBootstrapped = true;
 
   const PANEL_ID = "glad-arena-scanner";
@@ -29,7 +69,8 @@
   const BEST_CLASS = "glad-arena-best";
   const VISIBLE_SCAN_RETRY_DELAY_MS = 1200;
   const VISIBLE_SCAN_MAX_RETRIES = 3;
-  const POPUP_STATE_KEY = window.GladiatusAuctionSchema?.storageKeys?.popupState || "glad-ah-popup-state-v1";
+  const ARENA_UI_STATE_KEY = ARENA.uiStateStorageKey || "glad-arena-ui-state-v1";
+  const LEGACY_POPUP_STATE_KEY = window.GladiatusAuctionSchema?.storageKeys?.popupState || "glad-ah-popup-state-v1";
   let arenaFormulas = [ARENA.defaultArenaFormula()];
   let selectedFormulaId = "";
   let bootTimer = 0;
@@ -37,6 +78,10 @@
   let visibleRefreshRetryTimer = 0;
   let visibleRefreshInFlight = false;
   let lastObservedHref = window.location.href;
+  let active = false;
+  let activeSettings = null;
+  let operationGeneration = 0;
+  let initialized = false;
 
   function registerMissingArenaDependencyDiagnostic() {
     const error = "Arena content script dependency missing: arena-core.js or arena-scan.js. Reload the unpacked extension and refresh this arena tab.";
@@ -46,37 +91,59 @@
     if (typeof chrome === "undefined" || !chrome.runtime?.onMessage || window.__GladiatusArenaMissingDependencyListener) return;
 
     window.__GladiatusArenaMissingDependencyListener = (message, _sender, sendResponse) => {
-      if (![MESSAGE_TYPES.scanOpponents, MESSAGE_TYPES.boot, MESSAGE_TYPES.status].includes(message?.type)) return false;
+      if (![MESSAGE_TYPES.scanOpponents, MESSAGE_TYPES.boot, MESSAGE_TYPES.status, MESSAGE_TYPES.refreshSelfProfile].includes(message?.type)) return false;
       sendResponse({ ok: false, error });
       return false;
     };
     chrome.runtime.onMessage.addListener(window.__GladiatusArenaMissingDependencyListener);
   }
 
-  if (typeof chrome !== "undefined" && chrome.runtime?.onMessage) {
-    chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
-      if (message?.type === MESSAGE_TYPES.boot) {
-        boot();
-        sendResponse(getArenaContentStatus());
+  function handleRuntimeMessage(message, _sender, sendResponse) {
+    if (![MESSAGE_TYPES.scanOpponents, MESSAGE_TYPES.boot, MESSAGE_TYPES.status, MESSAGE_TYPES.refreshSelfProfile].includes(message?.type)) return false;
+    if (!active) {
+      sendResponse({ ok: false, code: "FEATURE_DISABLED", error: "Arena feature is disabled." });
+      return false;
+    }
+
+    if (message?.type === MESSAGE_TYPES.boot) {
+      boot();
+      sendResponse(getArenaContentStatus());
+      return false;
+    }
+
+    if (message?.type === MESSAGE_TYPES.status) {
+      sendResponse(getArenaContentStatus());
+      return false;
+    }
+
+    if (message?.type === MESSAGE_TYPES.refreshSelfProfile) {
+      if (!activeSettings?.manualScan || !activeSettings?.simulations) {
+        sendResponse({ ok: false, code: "FEATURE_DISABLED", error: "Arena simulations are disabled." });
         return false;
       }
-
-      if (message?.type === MESSAGE_TYPES.status) {
-        sendResponse(getArenaContentStatus());
-        return false;
-      }
-
-      if (message?.type !== MESSAGE_TYPES.scanOpponents) return false;
-
-      scanOpponents(message.formula)
-        .then(async (result) => {
-          await saveArenaResult(result);
-          sendResponse({ ok: true, result });
+      const generation = operationGeneration;
+      SCANNER.refreshSelfProfile({ force: Boolean(message.force) })
+        .then((record) => {
+          if (!active || generation !== operationGeneration) {
+            sendResponse({ ok: false, code: "FEATURE_DISABLED", error: "Arena feature is disabled." });
+            return;
+          }
+          sendResponse({ ok: true, record });
         })
         .catch((error) => sendResponse({ ok: false, error: error.message || String(error) }));
-
       return true;
-    });
+    }
+
+    if (!activeSettings?.manualScan) {
+      sendResponse({ ok: false, code: "FEATURE_DISABLED", error: "Manual arena scanning is disabled." });
+      return false;
+    }
+
+    scanOpponents(message.formula)
+      .then((result) => sendResponse({ ok: true, result }))
+      .catch((error) => sendResponse({ ok: false, error: error.message || String(error) }));
+
+    return true;
   }
 
   function getArenaContentStatus() {
@@ -92,14 +159,20 @@
   }
 
   async function scanOpponents(rawFormula) {
+    if (!active || !activeSettings?.manualScan) throw new Error("Manual arena scanning is disabled.");
+    const generation = operationGeneration;
     if (!ARENA.isArenaPageUrl(window.location.href)) {
       throw new Error("Open a Gladiatus arena page before scanning opponents.");
     }
 
     clearArenaBadges();
-    const result = await SCANNER.scanCurrentPage(rawFormula, { force: true });
+    const result = await SCANNER.scanCurrentPage(rawFormula, {
+      force: true,
+      simulations: activeSettings?.simulations !== false
+    });
+    if (!active || generation !== operationGeneration) throw new Error("Arena feature is disabled.");
     clearArenaBadges();
-    annotateResult(result);
+    if (activeSettings?.annotations) annotateResult(result);
     return result;
   }
 
@@ -110,11 +183,15 @@
       return;
     }
 
-    const result = await chrome.storage.local.get([ARENA.formulasStorageKey, POPUP_STATE_KEY]);
+    const result = await chrome.storage.local.get([ARENA.formulasStorageKey, ARENA_UI_STATE_KEY, LEGACY_POPUP_STATE_KEY]);
     const storedFormulas = ARENA.normalizeArenaFormulas(result[ARENA.formulasStorageKey]);
     arenaFormulas = storedFormulas.length ? storedFormulas : [ARENA.defaultArenaFormula()];
-    selectedFormulaId = String(result[POPUP_STATE_KEY]?.arenaFormulaId || "");
+    const uiState = result[ARENA_UI_STATE_KEY] || {};
+    selectedFormulaId = String(uiState.arenaFormulaId || result[LEGACY_POPUP_STATE_KEY]?.arenaFormulaId || "");
     if (!getSelectedFormula()) selectedFormulaId = getAvailableFormulas()[0]?.id || ARENA.defaultArenaFormula().id;
+    if (!uiState.arenaFormulaId && selectedFormulaId) {
+      await chrome.storage.local.set({ [ARENA_UI_STATE_KEY]: { arenaFormulaId: selectedFormulaId } });
+    }
   }
 
   function getAvailableFormulas() {
@@ -129,33 +206,34 @@
 
   async function saveSelectedFormulaId(formulaId) {
     selectedFormulaId = formulaId;
-    if (typeof chrome === "undefined" || !chrome.storage?.local) return;
+    if (!active || typeof chrome === "undefined" || !chrome.storage?.local) return;
 
-    const result = await chrome.storage.local.get(POPUP_STATE_KEY);
+    const generation = operationGeneration;
+    const result = await chrome.storage.local.get(ARENA_UI_STATE_KEY);
+    if (!active || generation !== operationGeneration) return;
     await chrome.storage.local.set({
-      [POPUP_STATE_KEY]: {
-        ...(result[POPUP_STATE_KEY] || {}),
+      [ARENA_UI_STATE_KEY]: {
+        ...(result[ARENA_UI_STATE_KEY] || {}),
         arenaFormulaId: selectedFormulaId
       }
     });
   }
 
-  async function saveArenaResult(result) {
-    if (typeof chrome === "undefined" || !chrome.storage?.local) return;
-    await chrome.storage.local.set({ [ARENA.resultsStorageKey]: result });
-  }
-
   function annotateResult(result) {
+    if (!active || !activeSettings?.annotations) return;
     const entries = ARENA.readArenaOpponentEntries(document, window.location.href);
     annotateRows(entries, result?.opponents || []);
   }
 
   async function annotateCachedResult(options = {}) {
+    if (!active || !activeSettings?.annotations) return false;
+    const generation = operationGeneration;
     const result = await SCANNER.getCachedResultForCurrentPage(getSelectedFormula(), {
-      updateLastResult: true,
+      updateLastResult: false,
       scanSource: options.fromStorage ? "storage" : "visible-cache"
     });
 
+    if (!active || generation !== operationGeneration) return false;
     if (result) {
       clearArenaBadges();
       annotateResult(result);
@@ -163,7 +241,7 @@
       if (status) setPanelStatus(status, resultStatusText(result), false);
     }
 
-    if (options.refresh !== false && !options.fromStorage) {
+    if (activeSettings?.passiveRefresh && options.refresh !== false && !options.fromStorage) {
       refreshVisibleScanInBackground(result);
     }
 
@@ -171,15 +249,18 @@
   }
 
   function refreshVisibleScanInBackground(previousResult = null, options = {}) {
-    if (visibleRefreshInFlight) return;
+    if (!active || !activeSettings?.passiveRefresh || visibleRefreshInFlight) return;
     visibleRefreshInFlight = true;
+    const generation = operationGeneration;
     const attempt = ARENA.parseInteger(options.attempt);
 
     SCANNER.ensureScanForCurrentPage(getSelectedFormula(), {
       updateLastResult: true,
-      scanSource: "visible"
+      scanSource: "visible",
+      simulations: activeSettings?.simulations !== false
     })
       .then((result) => {
+        if (!active || generation !== operationGeneration) return;
         if (!result) {
           if (!previousResult && shouldRetryVisibleScan(attempt)) scheduleVisibleScanRetry(attempt + 1);
           return;
@@ -198,15 +279,17 @@
         if (status) setPanelStatus(status, resultStatusText(result), false);
       })
       .catch((error) => {
+        if (!active || generation !== operationGeneration) return;
         const status = document.querySelector(`#${PANEL_ID} .glad-arena-status`);
         if (status && !document.querySelector(`.${BADGE_CLASS}`)) setPanelStatus(status, error.message || String(error), true);
       })
       .finally(() => {
-        visibleRefreshInFlight = false;
+        if (generation === operationGeneration) visibleRefreshInFlight = false;
       });
   }
 
   function shouldRetryVisibleScan(attempt) {
+    if (!active || !activeSettings?.passiveRefresh) return false;
     if (attempt >= VISIBLE_SCAN_MAX_RETRIES) return false;
     if (!ARENA.isArenaPageUrl(window.location.href)) return false;
     if (document.querySelector(`.${BADGE_CLASS}`)) return false;
@@ -214,6 +297,7 @@
   }
 
   function scheduleVisibleScanRetry(attempt) {
+    if (!active || !activeSettings?.passiveRefresh) return;
     window.clearTimeout(visibleRefreshRetryTimer);
     visibleRefreshRetryTimer = window.setTimeout(() => {
       refreshVisibleScanInBackground(null, { attempt });
@@ -388,7 +472,8 @@
   }
 
   function ensurePanel() {
-    if (!ARENA.isArenaPageUrl(window.location.href) || document.getElementById(PANEL_ID)) return;
+    if (!active || (!activeSettings?.manualScan && !activeSettings?.annotations)
+      || !ARENA.isArenaPageUrl(window.location.href) || document.getElementById(PANEL_ID)) return;
 
     const entries = ARENA.readArenaOpponentEntries(document);
     const table = entries[0]?.row?.closest("table");
@@ -398,7 +483,7 @@
     panel.id = PANEL_ID;
 
     const title = document.createElement("strong");
-    title.textContent = "Arena scanner";
+    title.textContent = "Arena insights";
 
     const formulaLabel = document.createElement("label");
     formulaLabel.htmlFor = "glad-arena-formula";
@@ -411,7 +496,7 @@
       saveSelectedFormulaId(select.value)
         .then(() => {
           clearArenaBadges();
-          return annotateCachedResult();
+          return activeSettings?.annotations ? annotateCachedResult({ refresh: activeSettings?.passiveRefresh }) : false;
         })
         .catch(() => {});
     });
@@ -419,6 +504,7 @@
     const button = document.createElement("button");
     button.type = "button";
     button.textContent = entries.some((entry) => entry?.opponent?.arenaKind === "team") ? "Scan scores" : "Scan odds";
+    button.disabled = !activeSettings?.manualScan;
     button.addEventListener("click", () => {
       runPanelScan(button, select, status).catch((error) => {
         setPanelStatus(status, error.message || String(error), true);
@@ -427,6 +513,7 @@
 
     const status = document.createElement("span");
     status.className = "glad-arena-status";
+    status.setAttribute("aria-live", "polite");
     status.textContent = `${entries.length} opponents`;
 
     panel.append(title, formulaLabel, select, button, status);
@@ -445,6 +532,8 @@
   }
 
   async function runPanelScan(button, select, status) {
+    if (!active || !activeSettings?.manualScan) throw new Error("Manual arena scanning is disabled.");
+    const generation = operationGeneration;
     button.disabled = true;
     select.disabled = true;
     setPanelStatus(status, "Scanning profiles...", false);
@@ -453,8 +542,8 @@
       const formula = arenaFormulas.find((candidate) => candidate.id === select.value) || getSelectedFormula();
       await saveSelectedFormulaId(formula.id);
       const result = await scanOpponents(formula);
+      if (!active || generation !== operationGeneration) return;
       if (!result) throw new Error("Scan is already running. Wait for the current scan to finish.");
-      await saveArenaResult(result);
 
       setPanelStatus(status, resultStatusText(result), false);
     } finally {
@@ -491,8 +580,10 @@
   }
 
   function boot() {
+    if (!active) return;
     window.clearTimeout(bootTimer);
     bootTimer = window.setTimeout(() => {
+      if (!active) return;
       if (!ARENA.isArenaPageUrl(window.location.href)) {
         removeArenaPanel();
         return;
@@ -500,12 +591,16 @@
 
       loadFormulaState()
         .then(async () => {
+          if (!active) return;
           ensurePanel();
-          subscribeToPassiveCacheChanges();
-          await SCANNER.rememberCurrentListUrl(window.location.href);
-          await annotateCachedResult();
+          if (activeSettings?.annotations) subscribeToPassiveCacheChanges();
+          if (activeSettings?.passiveRefresh) await SCANNER.rememberCurrentListUrl(window.location.href);
+          if (activeSettings?.annotations) {
+            await annotateCachedResult({ refresh: activeSettings?.passiveRefresh });
+          }
         })
         .catch(() => {
+          if (!active) return;
           arenaFormulas = [ARENA.defaultArenaFormula()];
           selectedFormulaId = arenaFormulas[0].id;
           ensurePanel();
@@ -515,6 +610,7 @@
   window.__GladiatusArenaContentBoot = boot;
 
   function scheduleCachedAnnotation() {
+    if (!active || !activeSettings?.annotations) return;
     window.clearTimeout(annotationTimer);
     annotationTimer = window.setTimeout(() => {
       annotateCachedResult().catch(() => {});
@@ -522,6 +618,7 @@
   }
 
   function handleArenaContentMutation() {
+    if (!active) return;
     if (window.location.href !== lastObservedHref) {
       lastObservedHref = window.location.href;
       boot();
@@ -540,6 +637,7 @@
   }
 
   function scheduleArenaBootForLocation() {
+    if (!active) return;
     if (window.location.href !== lastObservedHref) lastObservedHref = window.location.href;
     boot();
   }
@@ -547,7 +645,7 @@
   const observer = new MutationObserver(handleArenaContentMutation);
 
   function subscribeToPassiveCacheChanges() {
-    if (!chrome.storage?.onChanged || window.__GladiatusArenaPassiveCacheListener) return;
+    if (!active || !activeSettings?.annotations || !chrome.storage?.onChanged || window.__GladiatusArenaPassiveCacheListener) return;
 
     window.__GladiatusArenaPassiveCacheListener = (changes, areaName) => {
       if (areaName !== "local" || !changes[ARENA.passiveScansStorageKey]) return;
@@ -556,15 +654,69 @@
     chrome.storage.onChanged.addListener(window.__GladiatusArenaPassiveCacheListener);
   }
 
-  if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", boot, { once: true });
-  } else {
-    boot();
+  async function start(settings = {}) {
+    if (!shouldRunArenaController(settings)) return stop();
+    if (active) return update(settings);
+
+    active = true;
+    activeSettings = { ...settings };
+    operationGeneration += 1;
+    initialized = true;
+
+    if (typeof chrome !== "undefined" && chrome.runtime?.onMessage) {
+      chrome.runtime.onMessage.addListener(handleRuntimeMessage);
+    }
+    if (document.readyState === "loading") {
+      document.addEventListener("DOMContentLoaded", boot, { once: true });
+    } else {
+      boot();
+    }
+    window.addEventListener("pageshow", scheduleArenaBootForLocation);
+    window.addEventListener("popstate", scheduleArenaBootForLocation);
+    window.addEventListener("hashchange", scheduleArenaBootForLocation);
+    observer.observe(document.documentElement, { childList: true, subtree: true });
   }
 
-  window.addEventListener("pageshow", scheduleArenaBootForLocation);
-  window.addEventListener("popstate", scheduleArenaBootForLocation);
-  window.addEventListener("hashchange", scheduleArenaBootForLocation);
+  async function update(settings = {}) {
+    await stop();
+    if (shouldRunArenaController(settings)) await start(settings);
+  }
 
-  observer.observe(document.documentElement, { childList: true, subtree: true });
+  async function stop() {
+    active = false;
+    activeSettings = null;
+    initialized = false;
+    operationGeneration += 1;
+    visibleRefreshInFlight = false;
+    window.clearTimeout(bootTimer);
+    window.clearTimeout(annotationTimer);
+    window.clearTimeout(visibleRefreshRetryTimer);
+    observer.disconnect();
+    document.removeEventListener("DOMContentLoaded", boot);
+    window.removeEventListener("pageshow", scheduleArenaBootForLocation);
+    window.removeEventListener("popstate", scheduleArenaBootForLocation);
+    window.removeEventListener("hashchange", scheduleArenaBootForLocation);
+    removeArenaPanel();
+
+    if (typeof chrome !== "undefined" && chrome.runtime?.onMessage) {
+      chrome.runtime.onMessage.removeListener(handleRuntimeMessage);
+    }
+    const cacheListener = window.__GladiatusArenaPassiveCacheListener;
+    if (cacheListener && typeof chrome !== "undefined" && chrome.storage?.onChanged) {
+      chrome.storage.onChanged.removeListener(cacheListener);
+    }
+    delete window.__GladiatusArenaPassiveCacheListener;
+  }
+
+  window.__GladiatusArenaContentBoot = boot;
+  window.GladiatusArenaFeature = {
+    version: CONTENT_VERSION,
+    ready: true,
+    start,
+    update,
+    stop,
+    getStatus() {
+      return { ...getArenaContentStatus(), active, initialized };
+    }
+  };
 })();

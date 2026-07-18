@@ -1,13 +1,18 @@
 (() => {
   const root = typeof globalThis !== "undefined" ? globalThis : window;
   const pageDocument = root.document || null;
-  const CORE_VERSION = "auction-core-v4";
+  const CORE_VERSION = "auction-core-v5";
   const PAGE_BRIDGE_REQUEST_SOURCE = "glad-ah-extension-v3";
   const PAGE_BRIDGE_RESPONSE_SOURCE = "glad-ah-page-v3";
   const SCHEMA = root.GladiatusAuctionSchema;
   if (!SCHEMA) {
     if (!isAuctionPageUrl(root.document?.location?.href || root.location?.href || "")) return;
     throw new Error("GladiatusAuctionSchema must load before GladiatusAuctionCore.");
+  }
+  const TOOLTIP_PARSER = root.GladiatusTooltipParser;
+  if (typeof TOOLTIP_PARSER?.parseTooltipLinesFromValue !== "function"
+    || typeof TOOLTIP_PARSER?.parseItemTooltipFromValue !== "function") {
+    throw new Error("GladiatusTooltipParser must load before GladiatusAuctionCore.");
   }
 
   if (root.GladiatusAuctionCore?.version === CORE_VERSION) {
@@ -102,20 +107,11 @@
   }
 
   function parseTooltipLinesFromValue(raw, doc = pageDocument) {
-    return parseItemTooltipFromValue(raw)
-      .map((entry) => stripHtml(Array.isArray(entry) ? entry[0] : entry, doc))
-      .filter(Boolean);
+    return TOOLTIP_PARSER.parseTooltipLinesFromValue(raw, doc);
   }
 
   function parseItemTooltipFromValue(raw) {
-    if (!raw) return [];
-
-    try {
-      const tooltip = JSON.parse(raw);
-      return Array.isArray(tooltip) && Array.isArray(tooltip[0]) ? tooltip[0] : [];
-    } catch {
-      return [];
-    }
+    return TOOLTIP_PARSER.parseItemTooltipFromValue(raw);
   }
 
   function qualityInfo(value, titleStyle = "") {
@@ -871,8 +867,7 @@
   // Page-world bridge
   function shouldInstallPageBridge() {
     if (!pageDocument || typeof root.addEventListener !== "function" || typeof root.postMessage !== "function") return false;
-    const hasExtensionRuntime = typeof chrome !== "undefined" && Boolean(chrome.runtime?.id);
-    return pageDocument.currentScript?.dataset.gladAuctionPageBridge === "1" || !hasExtensionRuntime;
+    return pageDocument.currentScript?.dataset.gladAuctionPageBridge === "1";
   }
 
   function installPageBridge(coreApi) {

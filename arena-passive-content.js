@@ -1,14 +1,13 @@
 (() => {
   const root = typeof globalThis !== "undefined" ? globalThis : window;
   const ARENA = root.GladiatusArenaCore;
+  const SECURITY = root.GladiatusHelperSecurity;
   const devLogger = root.GladiatusLog ? root.GladiatusLog.createLogger("arena-passive") : null;
+  const VERSION = "arena-passive-content-v2";
 
   if (!ARENA || typeof chrome === "undefined" || !chrome.runtime?.sendMessage) return;
 
-  if (root.__GladiatusArenaPassiveContentLoaded) {
-    root.__GladiatusArenaPassiveContentBoot?.();
-    return;
-  }
+  if (root.GladiatusArenaPassiveFeature?.version === VERSION) return;
   root.__GladiatusArenaPassiveContentLoaded = true;
 
   const PASSIVE_BOOT_DELAY_MS = 1200;
@@ -19,6 +18,8 @@
   let lastForcedPassiveCheckAt = 0;
   let lastAfterFightSignal = "";
   let lastArenaKind = "";
+  let active = false;
+  let afterFightObserver = null;
 
   function isGladiatusGamePage(url) {
     try {
@@ -41,7 +42,7 @@
   }
 
   function bootPassiveContent() {
-    if (!isGladiatusGamePage(root.location?.href || "")) return;
+    if (!active || !isGladiatusGamePage(root.location?.href || "")) return;
     preferredArenaKind();
     subscribePassiveTriggers();
     root.clearTimeout(passiveBootTimer);
@@ -52,25 +53,28 @@
   root.__GladiatusArenaPassiveContentBoot = bootPassiveContent;
 
   function subscribePassiveTriggers() {
-    if (root.__GladiatusArenaPassiveTriggers) return;
+    if (!active || root.__GladiatusArenaPassiveTriggers) return;
     root.__GladiatusArenaPassiveTriggers = true;
 
     root.addEventListener?.("focus", recoverAfterFightCheck);
     root.addEventListener?.("pageshow", recoverAfterFightCheck);
 
-    root.document?.addEventListener?.("visibilitychange", () => {
-      if (root.document.visibilityState && root.document.visibilityState !== "visible") return;
-      recoverAfterFightCheck();
-    });
+    root.document?.addEventListener?.("visibilitychange", handleVisibilityChange);
 
     root.document?.addEventListener?.("click", handleFightTriggerClick, true);
 
-    if (root.MutationObserver && root.document?.documentElement && !root.__GladiatusArenaAfterFightObserver) {
-      root.__GladiatusArenaAfterFightObserver = new root.MutationObserver(() => {
+    if (root.MutationObserver && root.document?.documentElement && !afterFightObserver) {
+      afterFightObserver = new root.MutationObserver(() => {
         maybeTriggerAfterFightCheck();
       });
-      root.__GladiatusArenaAfterFightObserver.observe(root.document.documentElement, { childList: true, subtree: true });
+      afterFightObserver.observe(root.document.documentElement, { childList: true, subtree: true });
+      root.__GladiatusArenaAfterFightObserver = afterFightObserver;
     }
+  }
+
+  function handleVisibilityChange() {
+    if (root.document.visibilityState && root.document.visibilityState !== "visible") return;
+    recoverAfterFightCheck();
   }
 
   function recoverAfterFightCheck() {
@@ -78,7 +82,7 @@
   }
 
   function maybeTriggerAfterFightCheck() {
-    if (!looksLikeArenaAfterFightPage()) return;
+    if (!active || !looksLikeArenaAfterFightPage()) return;
 
     const signal = afterFightSignal();
     if (!signal || signal === lastAfterFightSignal) return;
@@ -93,7 +97,7 @@
       onlyPreferred: Boolean(preferredKind)
     }).catch((error) => {
       if (devLogger) devLogger.warn("after-fight arena scan trigger failed", { error: String(error?.message || error) });
-      else console.warn("After-fight arena scan trigger failed.", error);
+      else console.warn("After-fight arena scan trigger failed.", safeError(error));
     });
   }
 
@@ -131,6 +135,7 @@
   }
 
   function handleFightTriggerClick(event) {
+    if (!active) return;
     const trigger = event.target?.closest?.(".attack[onclick], [onclick*='startFight'], [onclick*='startGroupFight'], [onclick*='startProvinciarumFight']");
     if (!trigger || !root.document?.contains?.(trigger)) return;
 
@@ -168,11 +173,12 @@
       onlyPreferred: Boolean(preferredKind)
     }).catch((error) => {
       if (devLogger) devLogger.warn("fight-click arena scan trigger failed", { error: String(error?.message || error) });
-      else console.warn("Fight-click arena scan trigger failed.", error);
+      else console.warn("Fight-click arena scan trigger failed.", safeError(error));
     });
   }
 
   function triggerPassiveCheck(_reason, options = {}) {
+    if (!active) return Promise.reject(new Error("Passive arena refresh is disabled."));
     const force = Boolean(options.force);
     const now = Date.now();
     if (force && !options.bypassDebounce && now - lastForcedPassiveCheckAt < PASSIVE_FORCE_DEBOUNCE_MS) {
@@ -207,9 +213,50 @@
     });
   }
 
-  if (root.document?.readyState === "loading") {
-    root.document.addEventListener("DOMContentLoaded", bootPassiveContent, { once: true });
-  } else {
-    bootPassiveContent();
+  function safeError(error) {
+    const message = String(error?.message || error || "");
+    return SECURITY?.sanitizeText ? SECURITY.sanitizeText(message) : message;
   }
+
+  async function start(settings = {}) {
+    if (!settings?.enabled || !settings?.passiveRefresh) return stop();
+    if (active) return;
+    active = true;
+    if (root.document?.readyState === "loading") {
+      root.document.addEventListener("DOMContentLoaded", bootPassiveContent, { once: true });
+    } else {
+      bootPassiveContent();
+    }
+  }
+
+  async function update(settings = {}) {
+    if (settings?.enabled && settings?.passiveRefresh) return start(settings);
+    return stop();
+  }
+
+  async function stop() {
+    active = false;
+    root.clearTimeout(passiveBootTimer);
+    root.document?.removeEventListener?.("DOMContentLoaded", bootPassiveContent);
+    root.removeEventListener?.("focus", recoverAfterFightCheck);
+    root.removeEventListener?.("pageshow", recoverAfterFightCheck);
+    root.document?.removeEventListener?.("visibilitychange", handleVisibilityChange);
+    root.document?.removeEventListener?.("click", handleFightTriggerClick, true);
+    afterFightObserver?.disconnect?.();
+    afterFightObserver = null;
+    delete root.__GladiatusArenaAfterFightObserver;
+    delete root.__GladiatusArenaPassiveTriggers;
+    lastAfterFightSignal = "";
+  }
+
+  root.__GladiatusArenaPassiveContentBoot = bootPassiveContent;
+  root.GladiatusArenaPassiveFeature = {
+    version: VERSION,
+    start,
+    update,
+    stop,
+    getStatus() {
+      return { active, preferredKind: preferredArenaKind() };
+    }
+  };
 })();

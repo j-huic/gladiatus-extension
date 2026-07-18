@@ -13,6 +13,7 @@
   const PASSIVE_SCANS_STORAGE_KEY = "glad-arena-passive-scans-v1";
   const SCAN_STATUS_STORAGE_KEY = "glad-arena-scan-status-v1";
   const SELF_PROFILE_STORAGE_KEY = "glad-arena-self-profile-v1";
+  const UI_STATE_STORAGE_KEY = "glad-arena-ui-state-v1";
   const SELF_PROFILE_MAX_AGE_MS = 6 * 60 * 60 * 1000;
   const TEAM_DOLL_MIN = 2;
   const TEAM_DOLL_MAX = 6;
@@ -1289,6 +1290,7 @@
     resultsStorageKey: RESULTS_STORAGE_KEY,
     scanStatusStorageKey: SCAN_STATUS_STORAGE_KEY,
     selfProfileStorageKey: SELF_PROFILE_STORAGE_KEY,
+    uiStateStorageKey: UI_STATE_STORAGE_KEY,
     selfProfileMaxAgeMs: SELF_PROFILE_MAX_AGE_MS,
     arenaOpponentFingerprint,
     combatantFromCharacter,

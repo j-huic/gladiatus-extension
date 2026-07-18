@@ -2,10 +2,12 @@
   const root = typeof globalThis !== "undefined" ? globalThis : self;
   const ARENA = root.GladiatusArenaCore;
   const SIM = root.GladiatusArenaSim;
+  const SECURITY = root.GladiatusHelperSecurity;
 
   if (!ARENA || root.GladiatusArenaBackgroundScanner) return;
 
-  const POPUP_STATE_KEY = "glad-ah-popup-state-v1";
+  const ARENA_UI_STATE_KEY = ARENA.uiStateStorageKey || "glad-arena-ui-state-v1";
+  const LEGACY_POPUP_STATE_KEY = "glad-ah-popup-state-v1";
   const FULL_SCAN_QUIET_MS = 10 * 60 * 1000;
   const LIST_CHECK_INTERVAL_MS = 60 * 1000;
   const LOCK_TIMEOUT_MS = 5 * 60 * 1000;
@@ -89,17 +91,19 @@
   }
 
   async function passiveCheck({ url = "", preferredKind = "", force = false, onlyPreferred = false } = {}) {
+    await assertArenaEnabled("passiveRefresh");
     if (!isGladiatusGamePage(url)) return [];
 
     log("passive check starting", { url: safeUrl(url) });
     await rememberListUrl(url);
     const formula = await loadSelectedFormula();
+    const simulations = await arenaEnabled("simulations");
     const results = [];
     const preferred = KINDS.includes(preferredKind) ? preferredKind : "";
     const kinds = onlyPreferred && preferred ? [preferred] : orderedKinds(url, preferred);
 
     for (const kind of kinds) {
-      results.push(await checkPassiveKind(kind, formula, { url, force, preferredKind: preferred }));
+      results.push(await checkPassiveKind(kind, formula, { url, force, preferredKind: preferred, simulations }));
     }
 
     log("passive check finished", { results });
@@ -147,7 +151,9 @@
     });
   }
 
-  async function ensureVisibleScan({ url = "", entries = [], formula = null } = {}) {
+  async function ensureVisibleScan({ url = "", entries = [], formula = null, simulations = true } = {}) {
+    await assertArenaEnabled("passiveRefresh");
+    simulations = Boolean(simulations) && await arenaEnabled("simulations");
     const kind = currentArenaKind(url) || entries[0]?.opponent?.arenaKind || "single";
     await rememberListUrl(url);
     const ensured = await ensureScanForEntries(normalizeEntries(entries), formula || await loadSelectedFormula(), {
@@ -159,12 +165,15 @@
       concurrency: SCAN_CONCURRENCY,
       acquireLock: true,
       scanSource: "visible",
+      simulations,
       updateLastResult: true
     });
     return ensured.result;
   }
 
-  async function forceScan({ url = "", entries = [], formula = null } = {}) {
+  async function forceScan({ url = "", entries = [], formula = null, simulations = true } = {}) {
+    await assertArenaEnabled("manualScan");
+    simulations = Boolean(simulations) && await arenaEnabled("simulations");
     const kind = currentArenaKind(url) || entries[0]?.opponent?.arenaKind || "single";
     await rememberListUrl(url);
     const ensured = await ensureScanForEntries(normalizeEntries(entries), formula || await loadSelectedFormula(), {
@@ -176,6 +185,7 @@
       concurrency: SCAN_CONCURRENCY,
       acquireLock: true,
       scanSource: "manual",
+      simulations,
       updateLastResult: true
     });
     return ensured.result;
@@ -285,11 +295,13 @@
             concurrency: SCAN_CONCURRENCY,
             lockId,
             scanSource: "passive-list",
+            simulations: options.simulations !== false,
             updateLastResult: options.preferredKind === kind || currentArenaKind(options.url) === kind
           });
           await releasePassiveLock(kind, lockId, (current) => current);
           return { kind, ...ensured };
         } catch (error) {
+          if (error?.code === "FEATURE_DISABLED") throw error;
           lastError = error.message || String(error);
           log("arena page candidate failed", { kind, url: safeUrl(listUrl), error: lastError });
           if (record.listUrl) throw error;
@@ -312,6 +324,7 @@
       log("no opponents found in arena page candidates", { kind, lastError });
       return { kind, skipped: "no-opponents" };
     } catch (error) {
+      if (error?.code === "FEATURE_DISABLED") throw error;
       const message = error.message || String(error);
       await releasePassiveLock(kind, lockId, (current) => ({
         ...current,
@@ -332,6 +345,8 @@
   }
 
   async function ensureScanForEntries(entries, rawFormula, options = {}) {
+    const requiredCapability = options.scanSource === "manual" ? "manualScan" : "passiveRefresh";
+    await assertArenaEnabled(requiredCapability);
     if (!entries?.length) {
       if (options.kind) {
         await updateScanStatus(options.kind, {
@@ -348,6 +363,7 @@
     const formula = ARENA.normalizeArenaFormula(rawFormula) || ARENA.defaultArenaFormula();
     const kind = options.kind || entries[0]?.opponent?.arenaKind || "single";
     const fingerprint = options.fingerprint || ARENA.arenaOpponentFingerprint(entries);
+    const simulations = options.simulations !== false;
     const formulaKey = arenaFormulaFingerprint(formula);
     const cache = await loadPassiveCache();
     const record = cache[kind] || {};
@@ -357,7 +373,8 @@
     if (!options.force
       && record.result
       && record.fingerprint === fingerprint
-      && record.formulaFingerprint === formulaKey) {
+      && record.formulaFingerprint === formulaKey
+      && (record.result.simulationsEnabled !== false) === simulations) {
       if (options.updateCacheOnMatch || options.checkedAt) {
         await saveCachedResult(kind, {
           listUrl,
@@ -417,8 +434,11 @@
         fingerprint,
         scanSource: options.scanSource || "unknown",
         delayMs: Number(options.delayMs) || PASSIVE_SCAN_DELAY_MS,
-        concurrency: Number(options.concurrency) || SCAN_CONCURRENCY
+        concurrency: Number(options.concurrency) || SCAN_CONCURRENCY,
+        simulations,
+        requiredCapability
       });
+      await assertArenaEnabled(requiredCapability);
       await saveCachedResult(kind, {
         listUrl,
         checkedAt,
@@ -444,6 +464,7 @@
       log("saved scan result", { kind, source: options.scanSource || "unknown", opponents: result.opponentCount, failed: result.failedCount });
       return { result, scanned: true };
     } catch (error) {
+      if (error?.code === "FEATURE_DISABLED") throw error;
       await updateScanStatus(kind, {
         state: "error",
         source: options.scanSource || "unknown",
@@ -459,12 +480,14 @@
   }
 
   async function scanEntries(entries, rawFormula, options = {}) {
+    await assertArenaEnabled(options.requiredCapability || "");
     const formula = ARENA.normalizeArenaFormula(rawFormula) || ARENA.defaultArenaFormula();
     const arenaKind = options.arenaKind || entries[0]?.opponent?.arenaKind || "single";
     const fingerprint = options.fingerprint || ARENA.arenaOpponentFingerprint(entries);
+    const simulations = options.simulations !== false;
     const delayMs = Number(options.delayMs) || MANUAL_SCAN_DELAY_MS;
     const concurrency = Math.max(1, Math.min(ARENA.parseInteger(options.concurrency) || SCAN_CONCURRENCY, entries.length));
-    const selfProfile = arenaKind === "single" ? await readSelfProfileCache() : null;
+    const selfProfile = arenaKind === "single" && simulations ? await readSelfProfileCache() : null;
     const opponents = new Array(entries.length);
     const progress = {
       kind: arenaKind,
@@ -500,6 +523,7 @@
 
     async function worker() {
       while (nextIndex < entries.length) {
+        await assertArenaEnabled(options.requiredCapability || "");
         const index = nextIndex;
         nextIndex += 1;
         const entry = entries[index];
@@ -509,7 +533,8 @@
           name: entry.opponent.name,
           profileUrl: safeUrl(entry.opponent.profileUrl)
         });
-        opponents[index] = await scanOpponentEntry(entry, formula, { delayMs, progress, selfProfile });
+        opponents[index] = await scanOpponentEntry(entry, formula, { delayMs, progress, selfProfile, simulations });
+        await assertArenaEnabled(options.requiredCapability || "");
         progress.opponentDone += 1;
         await updateScanStatus(arenaKind, {
           state: "scanning",
@@ -535,6 +560,7 @@
       formulaId: formula.id,
       formulaName: formula.name,
       formulaFingerprint: arenaFormulaFingerprint(formula),
+      simulationsEnabled: simulations,
       arenaKind,
       sourceUrl: options.sourceUrl || "",
       fingerprint,
@@ -552,7 +578,7 @@
       source: options.scanSource || "unknown",
       cached: false
     });
-    return result;
+    return safeStorage(result);
   }
 
   async function scanOpponentEntry(entry, formula, options = {}) {
@@ -568,6 +594,7 @@
         ? await scanTeamOpponent(entry, html, formula, options)
         : scanSingleOpponent(entry, html, formula, profileUrl, options);
     } catch (error) {
+      if (error?.code === "FEATURE_DISABLED") throw error;
       if (!countedBaseProfile) await incrementProfileProgress(options.progress);
       log("opponent profile scan failed", {
         name: entry.opponent.name,
@@ -604,7 +631,9 @@
       formulaSection: scored.sectionKey,
       character
     };
-    const simulation = simulateSingleOpponent(options.selfProfile, result);
+    const simulation = options.simulations === false
+      ? simulationUnavailable(["simulations disabled"])
+      : simulateSingleOpponent(options.selfProfile, result);
     log("single opponent profile parsed", {
       rowIndex: entry.opponent.rowIndex,
       name: character.name,
@@ -997,12 +1026,16 @@
   }
 
   async function loadSelectedFormula() {
-    const result = await chrome.storage.local.get([ARENA.formulasStorageKey, POPUP_STATE_KEY]);
+    const result = await chrome.storage.local.get([ARENA.formulasStorageKey, ARENA_UI_STATE_KEY, LEGACY_POPUP_STATE_KEY]);
     const storedFormulas = ARENA.normalizeArenaFormulas(result[ARENA.formulasStorageKey]);
     const formulas = storedFormulas.length ? storedFormulas : [ARENA.defaultArenaFormula()];
     const enabled = formulas.filter((formula) => formula.enabled);
     const available = enabled.length ? enabled : formulas;
-    const selectedFormulaId = String(result[POPUP_STATE_KEY]?.arenaFormulaId || "");
+    const selectedFormulaId = String(
+      result[ARENA_UI_STATE_KEY]?.arenaFormulaId
+      || result[LEGACY_POPUP_STATE_KEY]?.arenaFormulaId
+      || ""
+    );
     return available.find((formula) => formula.id === selectedFormulaId) || available[0] || ARENA.defaultArenaFormula();
   }
 
@@ -1064,7 +1097,8 @@
   }
 
   async function savePassiveCache(cache) {
-    await chrome.storage.local.set({ [ARENA.passiveScansStorageKey]: normalizePassiveCache(cache) });
+    if (!await arenaEnabled()) return;
+    await chrome.storage.local.set({ [ARENA.passiveScansStorageKey]: safeStorage(normalizePassiveCache(cache)) });
   }
 
   function normalizePassiveCache(cache) {
@@ -1081,7 +1115,8 @@
   }
 
   async function saveLastResult(result) {
-    await chrome.storage.local.set({ [ARENA.resultsStorageKey]: result });
+    if (!await arenaEnabled()) return;
+    await chrome.storage.local.set({ [ARENA.resultsStorageKey]: safeStorage(result) });
   }
 
   async function incrementProfileProgress(progress) {
@@ -1150,7 +1185,8 @@
   }
 
   async function saveScanStatus(status) {
-    await chrome.storage.local.set({ [ARENA.scanStatusStorageKey]: normalizeScanStatus(status) });
+    if (!await arenaEnabled()) return;
+    await chrome.storage.local.set({ [ARENA.scanStatusStorageKey]: safeStorage(normalizeScanStatus(status)) });
   }
 
   function normalizeScanStatus(status) {
@@ -1195,6 +1231,7 @@
   }
 
   async function refreshSelfProfile(options = {}) {
+    await assertArenaEnabled("simulations");
     const profileUrl = normalizeProfileUrl(options.profileUrl);
     const cached = await readSelfProfileCache();
     const playerId = profileUrl.searchParams.get("p") || "";
@@ -1225,13 +1262,15 @@
       cacheKey,
       character
     };
-    await chrome.storage.local.set({ [ARENA.selfProfileStorageKey]: record });
+    const safeRecord = safeStorage(record);
+    await assertArenaEnabled("simulations");
+    await chrome.storage.local.set({ [ARENA.selfProfileStorageKey]: safeRecord });
     log("self profile refreshed", {
       playerId,
       ready: Boolean(character?.combat?.ready),
       combat: combatDiagnostics(character)
     });
-    return record;
+    return safeRecord;
   }
 
   async function readSelfProfileCache() {
@@ -1255,10 +1294,12 @@
   }
 
   async function fetchProfileHtml(url) {
+    await assertArenaEnabled();
     return fetchGladiatusHtml(normalizeProfileUrl(url), "Profile");
   }
 
   async function fetchArenaListHtml(url) {
+    await assertArenaEnabled("passiveRefresh");
     return fetchGladiatusHtml(normalizeArenaListUrl(url), "Arena list");
   }
 
@@ -1286,7 +1327,9 @@
   }
 
   function normalizeProfileUrl(rawUrl) {
-    const url = new URL(String(rawUrl || ""));
+    const url = SECURITY?.parseAllowedGameforgeUrl
+      ? SECURITY.parseAllowedGameforgeUrl(rawUrl)
+      : new URL(String(rawUrl || ""));
     if (url.protocol !== "https:") throw new Error("Only HTTPS Gladiatus profile URLs can be fetched.");
     if (!url.hostname.endsWith(".gladiatus.gameforge.com")) throw new Error("Only Gladiatus profile URLs can be fetched.");
     if (!url.pathname.endsWith("/game/index.php") || url.searchParams.get("mod") !== "player") {
@@ -1296,7 +1339,9 @@
   }
 
   function normalizeArenaListUrl(rawUrl) {
-    const url = new URL(String(rawUrl || ""));
+    const url = SECURITY?.parseAllowedGameforgeUrl
+      ? SECURITY.parseAllowedGameforgeUrl(rawUrl)
+      : new URL(String(rawUrl || ""));
     if (url.protocol !== "https:") throw new Error("Only HTTPS Gladiatus arena URLs can be fetched.");
     if (!url.hostname.endsWith(".gladiatus.gameforge.com")) throw new Error("Only Gladiatus arena URLs can be fetched.");
     if (!url.pathname.endsWith("/game/index.php") || url.searchParams.get("mod") !== "arena") {
@@ -1391,10 +1436,11 @@
 
   function warn(message, details = {}) {
     if (devLogger) devLogger.warn(message, details);
-    else console.warn(LOG_PREFIX, message, details);
+    else console.warn(LOG_PREFIX, message, SECURITY?.sanitizeForLog ? SECURITY.sanitizeForLog(details) : details);
   }
 
   function safeUrl(value) {
+    if (SECURITY?.sanitizeUrl) return SECURITY.sanitizeUrl(value);
     try {
       const url = new URL(String(value || ""));
       if (url.searchParams.has("sh")) url.searchParams.set("sh", "[redacted]");
@@ -1402,6 +1448,32 @@
     } catch {
       return String(value || "");
     }
+  }
+
+  function safeStorage(value) {
+    return SECURITY?.sanitizeForStorage ? SECURITY.sanitizeForStorage(value) : value;
+  }
+
+  async function arenaEnabled(capability = "") {
+    if (typeof root.GladiatusBackgroundFeatureGate !== "function") return true;
+    return Boolean(await root.GladiatusBackgroundFeatureGate("arena", capability));
+  }
+
+  async function assertArenaEnabled(capability = "") {
+    if (await arenaEnabled(capability)) return;
+    const error = new Error(capability
+      ? `Arena ${capability} capability is disabled.`
+      : "Arena feature is disabled.");
+    error.code = "FEATURE_DISABLED";
+    throw error;
+  }
+
+  function cancelScheduledPassiveChecks() {
+    for (const [key, pending] of delayedPassiveChecks.entries()) {
+      clearTimeout(pending.timerId);
+      pending.resolve([{ kind: pending.kind || key, skipped: "feature-disabled" }]);
+    }
+    delayedPassiveChecks.clear();
   }
 
   function opponentNames(entries = []) {
@@ -1413,6 +1485,7 @@
   root.GladiatusArenaBackgroundScanner = {
     arenaFormulaFingerprint,
     arenaListCandidates,
+    cancelScheduledPassiveChecks,
     ensureScanForEntries,
     ensureVisibleScan,
     fetchArenaListHtml,

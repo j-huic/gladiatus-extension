@@ -1,6 +1,7 @@
 (() => {
   const root = typeof globalThis !== "undefined" ? globalThis : window;
   const ARENA = root.GladiatusArenaCore;
+  const SECURITY = root.GladiatusHelperSecurity;
 
   if (!ARENA || typeof chrome === "undefined" || !chrome.runtime?.sendMessage) return;
   if (root.__GladiatusArenaScannerFacadeLoaded) return;
@@ -17,7 +18,7 @@
     return ARENA.readArenaOpponentEntries(root.document, root.location.href);
   }
 
-  async function scanCurrentPage(rawFormula) {
+  async function scanCurrentPage(rawFormula, options = {}) {
     if (!ARENA.isArenaPageUrl(root.location?.href || "")) {
       throw new Error("Open a Gladiatus arena page before scanning opponents.");
     }
@@ -29,7 +30,8 @@
       type: "GLAD_ARENA_FORCE_SCAN",
       url: root.location.href,
       entries: serializeEntries(entries),
-      formula: rawFormula || null
+      formula: rawFormula || null,
+      simulations: options.simulations !== false
     });
     if (!response?.ok) throw new Error(response?.error || "Could not scan arena opponents.");
     if (!response.result) throw new Error("Scan is already running. Wait for the current scan to finish.");
@@ -55,7 +57,8 @@
       type: options.force ? "GLAD_ARENA_FORCE_SCAN" : "GLAD_ARENA_ENSURE_VISIBLE_SCAN",
       url: options.url || options.listUrl || options.sourceUrl || root.location?.href || "",
       entries: serialized,
-      formula: rawFormula || null
+      formula: rawFormula || null,
+      simulations: options.simulations !== false
     });
     if (!response?.ok) throw new Error(response?.error || "Could not ensure arena scan.");
     return {
@@ -84,7 +87,10 @@
     if (!record.result || record.fingerprint !== fingerprint || record.formulaFingerprint !== formulaKey) return null;
 
     if (options.updateLastResult !== false) {
-      await chrome.storage.local.set({ [ARENA.resultsStorageKey]: record.result });
+      const safeResult = SECURITY?.sanitizeForStorage
+        ? SECURITY.sanitizeForStorage(record.result)
+        : record.result;
+      await chrome.storage.local.set({ [ARENA.resultsStorageKey]: safeResult });
     }
     return record.result;
   }
@@ -140,17 +146,6 @@
         }
         resolve(response);
       });
-    });
-  }
-
-  if (chrome.runtime?.onMessage) {
-    chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
-      if (message?.type !== "GLAD_ARENA_REFRESH_SELF_PROFILE") return false;
-
-      refreshSelfProfile({ force: Boolean(message.force) })
-        .then((record) => sendResponse({ ok: true, record }))
-        .catch((error) => sendResponse({ ok: false, error: error.message || String(error) }));
-      return true;
     });
   }
 

@@ -2,6 +2,7 @@
   const root = typeof globalThis !== "undefined" ? globalThis : self;
   const SCHEMA = root.GladiatusAuctionSchema;
   const CORE = root.GladiatusAuctionCore;
+  const SECURITY = root.GladiatusHelperSecurity;
 
   if (!SCHEMA || !CORE || root.GladiatusAuctionBackgroundScanner) return;
 
@@ -10,6 +11,7 @@
   let activeScanPromise = null;
 
   async function forceScan(rawRequest = {}) {
+    await assertFeatureEnabled("fullScan");
     if (activeScanPromise) return activeScanPromise;
 
     activeScanPromise = runScan(rawRequest)
@@ -26,7 +28,7 @@
       sources: request.sources.map((source) => source.label)
     });
 
-    const result = await scanRequest(request);
+    const result = safeStorage(await scanRequest(request));
     await saveLastResult(result);
     log("manual auction scan finished", {
       items: result.items.length,
@@ -47,6 +49,7 @@
     for (const source of request.sources) {
       for (const category of source.categories) {
         try {
+          await assertFeatureEnabled("fullScan");
           log("fetch auction category", {
             source: source.label,
             category: category.label,
@@ -66,6 +69,7 @@
             progress: `${completedCategories}/${totalCategories}`
           });
         } catch (error) {
+          if (error?.code === "FEATURE_DISABLED") throw error;
           completedCategories += 1;
           scanWarnings.push(`${category.label}: ${error.message || String(error)}`);
           log("auction category failed", {
@@ -196,7 +200,14 @@
   }
 
   function normalizeAuctionUrl(rawUrl, label) {
-    const url = new URL(String(rawUrl || ""));
+    let url;
+    try {
+      url = SECURITY?.parseAllowedGameforgeUrl
+        ? SECURITY.parseAllowedGameforgeUrl(rawUrl)
+        : new URL(String(rawUrl || ""));
+    } catch {
+      throw new Error(`${label} must be an HTTPS Gladiatus URL.`);
+    }
     if (url.protocol !== "https:") throw new Error(`${label} must use HTTPS.`);
     if (!url.hostname.endsWith(".gladiatus.gameforge.com")) throw new Error(`${label} must be a Gladiatus URL.`);
     if (!url.pathname.endsWith("/game/index.php") || url.searchParams.get("mod") !== "auction") {
@@ -207,7 +218,18 @@
 
   async function saveLastResult(result) {
     if (!root.chrome?.storage?.local) return;
-    await root.chrome.storage.local.set({ [SCHEMA.storageKeys.scanResult]: result });
+    await assertFeatureEnabled("fullScan");
+    await root.chrome.storage.local.set({ [SCHEMA.storageKeys.scanResult]: safeStorage(result) });
+  }
+
+  async function assertFeatureEnabled(capability) {
+    if (typeof root.GladiatusBackgroundFeatureGate !== "function") return;
+    const enabled = await root.GladiatusBackgroundFeatureGate("auction", capability);
+    if (!enabled) {
+      const error = new Error("Auction feature is disabled.");
+      error.code = "FEATURE_DISABLED";
+      throw error;
+    }
   }
 
   function delay(milliseconds) {
@@ -218,10 +240,11 @@
 
   function log(message, details = {}) {
     if (devLogger) devLogger.debug(message, details);
-    else console.log(LOG_PREFIX, message, details);
+    else console.log(LOG_PREFIX, message, SECURITY?.sanitizeForLog ? SECURITY.sanitizeForLog(details) : details);
   }
 
   function safeUrl(value) {
+    if (SECURITY?.sanitizeUrl) return SECURITY.sanitizeUrl(value);
     try {
       const url = new URL(String(value || ""));
       if (url.searchParams.has("sh")) url.searchParams.set("sh", "[redacted]");
@@ -229,6 +252,10 @@
     } catch {
       return String(value || "");
     }
+  }
+
+  function safeStorage(value) {
+    return SECURITY?.sanitizeForStorage ? SECURITY.sanitizeForStorage(value) : value;
   }
 
   root.GladiatusAuctionBackgroundScanner = {

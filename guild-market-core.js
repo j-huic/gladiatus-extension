@@ -1,34 +1,57 @@
-// Guild market auto-pricing.
+// Guild-market MAIN-world bridge.
 //
-// On the guild market page (index.php?mod=guildMarket) the game prices a freshly
-// placed sell item via window.marketDrop(to, amount): it sets the hidden sellid,
-// fills #preis from the item's average/gold price, then recomputes fees through
-// calcDues(). We wrap marketDrop so that Mini-Pumpkin is priced at 100,000 gold
-// per unit in its stack. Every other item keeps the game default.
-//
-// This runs in the MAIN world (see manifest content_scripts) so it can see the
-// page's marketDrop / calcDues globals directly. The drop machinery dispatches by
-// reading data-request-function="marketDrop" and calling it by name, so replacing
-// window.marketDrop is picked up even after the sell cell re-renders.
-//
-// Some other guild helper extensions also write #preis, but ~100ms AFTER the drop,
-// clobbering our value. So after applying our price we run a short re-assert guard:
-// for GUARD_DURATION_MS we keep restoring our price whenever something else changes
-// it, as long as the same item is still staged and the user is not editing the
-// field. This wins the race regardless of the other extension's exact timing.
+// The game's marketDrop/calcDues functions only exist in the page world. This
+// module deliberately does nothing to them when it is loaded. The isolated
+// guild-market controller starts the bridge when the feature is enabled, reads
+// the staged-item event, and may send one explicit, user-initiated price-fill
+// request. No code here submits the sell form.
 (() => {
   const root = typeof globalThis !== "undefined" ? globalThis : window;
-  const CORE_VERSION = "guild-market-core-v2";
-  const TARGET_ITEM_NAME = "Mini-Pumpkin";
-  const RATE_PER_ITEM = 100000;
-  const GUARD_DURATION_MS = 1500;
-  const GUARD_INTERVAL_MS = 50;
+  const CORE_VERSION = "guild-market-core-v4";
   const SELLID_SELECTOR = "#sellForm [name=\"sellid\"]";
+  const PRICE_FIELD_ID = "preis";
+  const INSTALL_RETRY_MS = 100;
+  const INSTALL_MAX_ATTEMPTS = 20;
+  const EVENTS = Object.freeze({
+    source: "glad-helper:guild-market-main",
+    staged: "staged"
+  });
+
+  const previous = root.GladiatusGuildMarket;
+  if (previous?.version === CORE_VERSION) return;
+
+  // Recover cleanly when an unpacked extension is reloaded over the old
+  // auto-pricing implementation on an already-open game page.
+  try {
+    previous?.stop?.();
+  } catch (_error) {
+    // A stale helper must not prevent the safe bridge from loading.
+  }
+  if (root.marketDrop?.__gladiatusAutoPrice && typeof root.marketDrop.__original === "function") {
+    root.marketDrop = root.marketDrop.__original;
+  }
+  if (root.__GladiatusGuildMarketControlBridge && root.document?.removeEventListener) {
+    root.document.removeEventListener(
+      "glad-helper:guild-market:control",
+      root.__GladiatusGuildMarketControlBridge
+    );
+    delete root.__GladiatusGuildMarketControlBridge;
+  }
+  const state = {
+    started: false,
+    wrapper: null,
+    original: null,
+    retryTimer: null,
+    retryAttempts: 0,
+    stageSequence: 0,
+    staged: null
+  };
 
   function isGuildMarketUrl(url) {
     try {
       const parsed = new URL(url);
-      return parsed.hostname.endsWith(".gladiatus.gameforge.com")
+      return parsed.protocol === "https:"
+        && parsed.hostname.endsWith(".gladiatus.gameforge.com")
         && parsed.pathname.endsWith("/game/index.php")
         && parsed.searchParams.get("mod") === "guildMarket";
     } catch {
@@ -36,140 +59,230 @@
     }
   }
 
-  function tooltipLines(element, context = root) {
-    const raw = element?.dataset?.tooltip || element?.getAttribute?.("data-tooltip") || "";
+  function decodeTooltipText(value, context = root) {
+    const text = String(value ?? "").replace(/<[^>]*>/g, "").trim();
+    const doc = context.document || root.document;
+    if (!text || !doc?.createElement) return text;
+    const textarea = doc.createElement("textarea");
+    textarea.innerHTML = text;
+    return String(textarea.value || textarea.textContent || text).trim();
+  }
+
+  function parseTooltipLinesFromValue(raw, context = root) {
     if (!raw) return [];
 
-    const parser = context.GladiatusAuctionCore?.parseTooltipLinesFromValue;
-    if (typeof parser === "function") return parser(raw, context.document || root.document);
+    const sharedParser = context.GladiatusTooltipParser?.parseTooltipLinesFromValue
+      || context.GladiatusTooltipParser?.parseLinesFromValue;
+    if (typeof sharedParser === "function") {
+      try {
+        return sharedParser(raw, context.document || root.document);
+      } catch (_error) {
+        // Fall through to the small local decoder so this feature stays isolated.
+      }
+    }
 
     try {
-      const tooltip = JSON.parse(raw);
+      const tooltip = JSON.parse(String(raw));
       const entries = Array.isArray(tooltip) && Array.isArray(tooltip[0]) ? tooltip[0] : [];
       return entries
-        .map((entry) => String(Array.isArray(entry) ? entry[0] : entry).replace(/<[^>]*>/g, "").trim())
+        .map((entry) => decodeTooltipText(Array.isArray(entry) ? entry[0] : entry, context))
         .filter(Boolean);
     } catch {
       return [];
     }
   }
 
-  // `to` is the game's drop target. After marketDrop has run it contains the
-  // staged item; checking #sellForm also covers markup variants where it does not.
-  function isTargetItem(to, context = root) {
+  function tooltipLines(element, context = root) {
+    const raw = element?.dataset?.tooltip || element?.getAttribute?.("data-tooltip") || "";
+    return parseTooltipLinesFromValue(raw, context);
+  }
+
+  function findTooltipElement(candidate) {
+    if (!candidate) return null;
+    if (candidate.dataset?.tooltip || candidate.getAttribute?.("data-tooltip")) return candidate;
+    return candidate.querySelector?.("[data-tooltip]") || null;
+  }
+
+  function readItemName(to, context = root) {
     const doc = context.document || root.document;
     const candidates = [to, to?.[0], to?.element, doc?.querySelector?.("#sellForm")];
-
-    return candidates.some((candidate) => {
-      if (!candidate) return false;
-      const icon = candidate.dataset?.tooltip || candidate.getAttribute?.("data-tooltip")
-        ? candidate
-        : candidate.querySelector?.("[data-tooltip]");
-      return tooltipLines(icon, context).some((line) => line === TARGET_ITEM_NAME);
-    });
-  }
-
-  // Overwrite #preis with the Mini-Pumpkin stack price and refresh the fee display.
-  // Returns the applied price, or null when the game default should stand.
-  function applyAutoPrice(to, amount, context = root) {
-    if (!isTargetItem(to, context)) return null;
-    const quantity = Number(amount);
-    if (!Number.isFinite(quantity) || quantity <= 0) return null;
-    const price = Math.floor(quantity) * RATE_PER_ITEM;
-    const doc = context.document || root.document;
-    const field = doc?.getElementById("preis");
-    if (!field) return null;
-    field.value = String(price);
-    if (typeof context.calcDues === "function") context.calcDues();
-    return price;
-  }
-
-  // Restore our price if something else changed #preis. Does nothing when the
-  // value is already ours, the user is editing the field, or a different item
-  // (or none) is now staged. Returns true when it re-applied the price.
-  function reassertIfClobbered(target, expectedSellid, context = root) {
-    const doc = context.document || root.document;
-    const field = doc?.getElementById?.("preis");
-    if (!field) return false;
-    if (doc.activeElement === field) return false;             // user is typing — don't fight
-    const sellEl = doc.querySelector?.(SELLID_SELECTOR);
-    if (expectedSellid != null && sellEl && sellEl.value !== expectedSellid) return false;
-    if (field.value === String(target)) return false;          // already correct
-    field.value = String(target);
-    if (typeof context.calcDues === "function") context.calcDues();
-    return true;
-  }
-
-  // Keep our price in place for a short window after the drop, defeating a late
-  // overwrite by another extension. Re-arms (replaces) any prior guard.
-  function guardPrice(target, context = root) {
-    if (typeof context.setInterval !== "function") return;
-    const doc = context.document || root.document;
-    const sellEl = doc?.querySelector?.(SELLID_SELECTOR);
-    const expectedSellid = sellEl ? sellEl.value : null;
-    if (context.__gmGuardTimer != null && typeof context.clearInterval === "function") {
-      context.clearInterval(context.__gmGuardTimer);
+    for (const candidate of candidates) {
+      const lines = tooltipLines(findTooltipElement(candidate), context);
+      if (lines.length) return lines[0];
     }
-    let elapsed = 0;
-    context.__gmGuardTimer = context.setInterval(() => {
-      elapsed += GUARD_INTERVAL_MS;
-      reassertIfClobbered(target, expectedSellid, context);
-      if (elapsed >= GUARD_DURATION_MS && typeof context.clearInterval === "function") {
-        context.clearInterval(context.__gmGuardTimer);
-        context.__gmGuardTimer = null;
-      }
-    }, GUARD_INTERVAL_MS);
+    return "";
   }
 
-  // Replace context.marketDrop with a wrapper that applies the Mini-Pumpkin stack price
-  // after the game's own pricing, then guards it. Idempotent; returns true once a
-  // wrapper is in place (or marketDrop is not defined yet).
-  function install(context = root) {
-    const original = context.marketDrop;
-    if (typeof original !== "function") return false;
-    if (original.__gladiatusAutoPrice) return true;
+  function positiveSafeInteger(value) {
+    const number = typeof value === "number" ? value : Number(String(value ?? "").trim());
+    return Number.isSafeInteger(number) && number > 0 ? number : null;
+  }
 
+  function readSellId(context = root) {
+    const doc = context.document || root.document;
+    return String(doc?.querySelector?.(SELLID_SELECTOR)?.value || "");
+  }
+
+  function readPrice(context = root) {
+    const doc = context.document || root.document;
+    return String(doc?.getElementById?.(PRICE_FIELD_ID)?.value || "");
+  }
+
+  function captureStagedItem(to, amount, context = root) {
+    const quantity = positiveSafeInteger(amount);
+    state.stageSequence += 1;
+    state.staged = {
+      stageId: `stage-${state.stageSequence}`,
+      itemName: readItemName(to, context),
+      quantity,
+      sellId: readSellId(context),
+      defaultPrice: readPrice(context)
+    };
+    return { ...state.staged };
+  }
+
+  function emitStagedItem(to, amount, context = root) {
+    if (!state.started) return null;
+    const staged = captureStagedItem(to, amount, context);
+    context.postMessage?.({ source: EVENTS.source, type: EVENTS.staged, detail: staged }, "*");
+    return staged;
+  }
+
+  function validateApplyRequest(request, context = root) {
+    if (!state.started) return { ok: false, code: "FEATURE_DISABLED", error: "Guild-market pricing is disabled." };
+    if (!request || typeof request !== "object") {
+      return { ok: false, code: "INVALID_REQUEST", error: "The price-fill request is invalid." };
+    }
+    if (!state.staged || request.stageId !== state.staged.stageId) {
+      return { ok: false, code: "STALE_ITEM", error: "The staged market item changed. Stage it again before applying a price." };
+    }
+
+    const quantity = positiveSafeInteger(request.quantity);
+    const unitPrice = positiveSafeInteger(request.unitPrice);
+    const price = positiveSafeInteger(request.price);
+    if (quantity === null || unitPrice === null || price === null) {
+      return { ok: false, code: "INVALID_PRICE", error: "The quantity and price must be positive whole numbers." };
+    }
+    const expectedPrice = quantity * unitPrice;
+    if (!Number.isSafeInteger(expectedPrice) || expectedPrice !== price) {
+      return { ok: false, code: "INVALID_PRICE", error: "The proposed total does not match the unit-price calculation." };
+    }
+
+    const normalizedExpectedName = String(request.itemName || "").trim().replace(/\s+/g, " ").toLocaleLowerCase();
+    const normalizedStagedName = String(state.staged.itemName || "").trim().replace(/\s+/g, " ").toLocaleLowerCase();
+    if (!normalizedExpectedName || normalizedExpectedName !== normalizedStagedName || quantity !== state.staged.quantity) {
+      return { ok: false, code: "STALE_ITEM", error: "The staged market item no longer matches this suggestion." };
+    }
+
+    const currentSellId = readSellId(context);
+    if (currentSellId !== state.staged.sellId) {
+      return { ok: false, code: "STALE_ITEM", error: "The staged market item changed. Stage it again before applying a price." };
+    }
+    const field = (context.document || root.document)?.getElementById?.(PRICE_FIELD_ID);
+    if (!field) return { ok: false, code: "PRICE_FIELD_MISSING", error: "The guild-market price field was not found." };
+    return { ok: true, field, price };
+  }
+
+  function applySuggestedPrice(request, context = root) {
+    const validation = validateApplyRequest(request, context);
+    if (!validation.ok) return validation;
+    validation.field.value = String(validation.price);
+    if (typeof context.calcDues === "function") context.calcDues();
+    return { ok: true, price: validation.price, stageId: state.staged.stageId };
+  }
+
+  function clearInstallRetry(context = root) {
+    if (state.retryTimer != null && typeof context.clearInterval === "function") {
+      context.clearInterval(state.retryTimer);
+    }
+    state.retryTimer = null;
+    state.retryAttempts = 0;
+  }
+
+  function install(context = root) {
+    if (!state.started) return false;
+    if (state.wrapper && context.marketDrop === state.wrapper) return true;
+    if (typeof context.marketDrop !== "function") return false;
+
+    const original = context.marketDrop;
     function marketDrop(to, amount) {
       const result = original.apply(this, arguments);
-      const price = applyAutoPrice(to, amount, context);
-      if (price !== null) guardPrice(price, context);
+      if (state.started) emitStagedItem(to, amount, context);
       return result;
     }
-    marketDrop.__gladiatusAutoPrice = true;
+    marketDrop.__gladiatusGuildMarketBridge = true;
+    marketDrop.__gladiatusGuildMarketOwner = CORE_VERSION;
     marketDrop.__original = original;
+    state.original = original;
+    state.wrapper = marketDrop;
     context.marketDrop = marketDrop;
+    clearInstallRetry(context);
     return true;
   }
 
-  if (root.GladiatusGuildMarket?.version === CORE_VERSION) {
-    root.GladiatusGuildMarket.install();
-    return;
+  function scheduleInstallRetry(context = root) {
+    if (!state.started || state.retryTimer != null || typeof context.setInterval !== "function") return;
+    state.retryTimer = context.setInterval(() => {
+      if (!state.started || install(context)) return;
+      state.retryAttempts += 1;
+      if (state.retryAttempts >= INSTALL_MAX_ATTEMPTS) clearInstallRetry(context);
+    }, INSTALL_RETRY_MS);
   }
 
-  root.GladiatusGuildMarket = {
-    version: CORE_VERSION,
-    targetItemName: TARGET_ITEM_NAME,
-    ratePerItem: RATE_PER_ITEM,
-    guardDurationMs: GUARD_DURATION_MS,
-    guardIntervalMs: GUARD_INTERVAL_MS,
-    isGuildMarketUrl,
-    tooltipLines,
-    isTargetItem,
-    applyAutoPrice,
-    reassertIfClobbered,
-    guardPrice,
-    install
-  };
+  function start(_settings, context = root) {
+    const href = context.location?.href || context.document?.location?.href || "";
+    if (!isGuildMarketUrl(href)) return false;
+    state.started = true;
+    if (!install(context)) scheduleInstallRetry(context);
+    return true;
+  }
 
-  if (isGuildMarketUrl(root.location?.href || root.document?.location?.href || "")) {
-    // marketDrop is defined inline by the page and is normally ready by the time
-    // this content script runs at document_idle; retry briefly to cover ordering.
-    if (!install() && typeof root.setInterval === "function") {
-      let tries = 0;
-      const timer = root.setInterval(() => {
-        tries += 1;
-        if (install() || tries >= 20) root.clearInterval(timer);
-      }, 100);
+  function update(settings, context = root) {
+    if (settings?.enabled === false) {
+      stop(context);
+      return false;
     }
+    return start(settings, context);
   }
+
+  function stop(context = root) {
+    state.started = false;
+    clearInstallRetry(context);
+    if (state.wrapper && context.marketDrop === state.wrapper && typeof state.original === "function") {
+      context.marketDrop = state.original;
+    }
+    state.wrapper = null;
+    state.original = null;
+    state.staged = null;
+    return true;
+  }
+
+  function getStatus(context = root) {
+    return {
+      started: state.started,
+      installed: Boolean(state.wrapper && context.marketDrop === state.wrapper),
+      waitingForMarketDrop: Boolean(state.retryTimer != null),
+      hasStagedItem: Boolean(state.staged)
+    };
+  }
+
+  const api = {
+    version: CORE_VERSION,
+    events: EVENTS,
+    isGuildMarketUrl,
+    parseTooltipLinesFromValue,
+    tooltipLines,
+    readItemName,
+    positiveSafeInteger,
+    captureStagedItem,
+    emitStagedItem,
+    validateApplyRequest,
+    applySuggestedPrice,
+    install,
+    start,
+    update,
+    stop,
+    getStatus
+  };
+  root.GladiatusGuildMarket = api;
 })();

@@ -1,18 +1,19 @@
 (() => {
   const root = typeof globalThis !== "undefined" ? globalThis : window;
   const ARENA = root.GladiatusArenaCore;
+  const VERSION = "arena-status-content-v2";
 
   if (!ARENA || typeof chrome === "undefined" || !chrome.storage?.local) return;
 
-  if (root.__GladiatusArenaStatusContentLoaded) {
-    root.__GladiatusArenaStatusContentBoot?.();
-    return;
-  }
+  if (root.GladiatusArenaStatusFeature?.version === VERSION) return;
   root.__GladiatusArenaStatusContentLoaded = true;
 
   const STATUS_BOX_ID = "glad-arena-passive-status";
   const STATUS_KINDS = ["single", "team"];
   let restoreTimer = 0;
+  let bootTimer = 0;
+  let active = false;
+  let restoreObserver = null;
 
   function isGladiatusGamePage(url) {
     try {
@@ -25,25 +26,27 @@
   }
 
   function bootStatusContent() {
-    if (!shouldRenderStatusBox()) {
+    if (!active || !shouldRenderStatusBox()) {
       removeStatusBox();
       return;
     }
 
-    const boot = () => {
-      ensureStatusBox();
-      subscribeToStatusChanges();
-      refreshStatusBox().catch(() => {});
-      observeStatusHost();
-    };
-
     if (root.document?.readyState === "loading") {
-      root.document.addEventListener("DOMContentLoaded", boot, { once: true });
+      root.document.addEventListener("DOMContentLoaded", startStatusNow, { once: true });
     } else {
-      root.setTimeout(boot, 0);
+      root.clearTimeout(bootTimer);
+      bootTimer = root.setTimeout(startStatusNow, 0);
     }
   }
   root.__GladiatusArenaStatusContentBoot = bootStatusContent;
+
+  function startStatusNow() {
+    if (!active) return;
+    ensureStatusBox();
+    subscribeToStatusChanges();
+    refreshStatusBox().catch(() => {});
+    observeStatusHost();
+  }
 
   function shouldRenderStatusBox(url = root.location?.href || "") {
     return isGladiatusGamePage(url);
@@ -54,16 +57,17 @@
   }
 
   async function refreshStatusBox() {
-    if (!shouldRenderStatusBox()) {
+    if (!active || !shouldRenderStatusBox()) {
       removeStatusBox();
       return;
     }
     const stored = await chrome.storage.local.get([ARENA.scanStatusStorageKey, ARENA.passiveScansStorageKey]);
+    if (!active) return;
     renderStatusBox(stored[ARENA.scanStatusStorageKey], stored[ARENA.passiveScansStorageKey]);
   }
 
   function ensureStatusBox() {
-    if (!shouldRenderStatusBox()) {
+    if (!active || !shouldRenderStatusBox()) {
       removeStatusBox();
       return null;
     }
@@ -120,7 +124,7 @@
   }
 
   function subscribeToStatusChanges() {
-    if (!chrome.storage?.onChanged || root.__GladiatusArenaStatusBoxListener) return;
+    if (!active || !chrome.storage?.onChanged || root.__GladiatusArenaStatusBoxListener) return;
     root.__GladiatusArenaStatusBoxListener = (changes, areaName) => {
       if (areaName !== "local") return;
       if (!changes[ARENA.scanStatusStorageKey] && !changes[ARENA.passiveScansStorageKey]) return;
@@ -130,15 +134,17 @@
   }
 
   function observeStatusHost() {
-    if (!root.MutationObserver || !root.document?.documentElement || root.__GladiatusArenaStatusRestoreObserver) return;
-    root.__GladiatusArenaStatusRestoreObserver = new root.MutationObserver(() => {
+    if (!active || !root.MutationObserver || !root.document?.documentElement || restoreObserver) return;
+    restoreObserver = new root.MutationObserver(() => {
       if (root.document?.getElementById?.(STATUS_BOX_ID)) return;
       scheduleStatusRestore();
     });
-    root.__GladiatusArenaStatusRestoreObserver.observe(root.document.documentElement, { childList: true, subtree: true });
+    restoreObserver.observe(root.document.documentElement, { childList: true, subtree: true });
+    root.__GladiatusArenaStatusRestoreObserver = restoreObserver;
   }
 
   function scheduleStatusRestore() {
+    if (!active) return;
     root.clearTimeout(restoreTimer);
     restoreTimer = root.setTimeout(() => {
       refreshStatusBox().catch(() => {});
@@ -146,7 +152,7 @@
   }
 
   function renderStatusBox(rawStatus, rawPassive) {
-    if (!shouldRenderStatusBox()) {
+    if (!active || !shouldRenderStatusBox()) {
       removeStatusBox();
       return;
     }
@@ -154,25 +160,10 @@
     if (!panel) return;
 
     const status = normalizeStatusCache(rawStatus);
-    const targets = bestFightTargets(rawPassive);
-    panel.replaceChildren(...STATUS_KINDS.map((kind) => renderStatusRow(kind, status[kind], targets[kind])));
+    panel.replaceChildren(...STATUS_KINDS.map((kind) => renderStatusRow(kind, status[kind])));
   }
 
-  function bestFightTargets(rawPassive) {
-    const fightModule = root.GladiatusArenaFight;
-    const targets = { single: null, team: null };
-    if (!fightModule || !rawPassive) return targets;
-    for (const kind of STATUS_KINDS) {
-      try {
-        targets[kind] = fightModule.bestTargetFromResult(rawPassive[kind] && rawPassive[kind].result);
-      } catch {
-        targets[kind] = null;
-      }
-    }
-    return targets;
-  }
-
-  function renderStatusRow(kind, record, target) {
+  function renderStatusRow(kind, record) {
     const row = root.document.createElement("div");
     row.className = `glad-arena-passive-status-row glad-arena-passive-status-${record.state}`;
 
@@ -188,45 +179,7 @@
     text.textContent = statusText(kind, record);
 
     row.append(label, badge, text);
-    if (record.state === "ready" && target) row.append(renderFightControl(kind, target));
     return row;
-  }
-
-  function renderFightControl(kind, target) {
-    const button = root.document.createElement("button");
-    button.type = "button";
-    button.className = "glad-arena-fight-button";
-    button.textContent = fightButtonLabel(target);
-    button.title = `Fight ${target.name} now (${kind === "team" ? "Circus" : "Arena"})`;
-    button.addEventListener("click", () => {
-      runFight(target, button).catch(() => {});
-    });
-    return button;
-  }
-
-  function fightButtonLabel(target) {
-    const win = Number.isFinite(target.winRate) ? ` (Win ${Math.round(target.winRate * 100)}%)` : "";
-    return `⚔ Fight ${target.name}${win}`;
-  }
-
-  async function runFight(target, button) {
-    const fightModule = root.GladiatusArenaFight;
-    if (!fightModule) return;
-
-    button.disabled = true;
-    button.classList.remove("glad-arena-fight-button-error");
-    button.textContent = `Fighting ${target.name}…`;
-
-    try {
-      const outcome = await fightModule.fight(target);
-      button.textContent = `Fought ${target.name} ✓ — opening report…`;
-      root.location.href = outcome.reportUrl || outcome.reportsUrl;
-    } catch (error) {
-      button.disabled = false;
-      button.classList.add("glad-arena-fight-button-error");
-      button.textContent = `⚠ ${shortError(error.message || String(error))}`;
-      button.title = error.message || String(error);
-    }
   }
 
   function normalizeStatusCache(status) {
@@ -324,5 +277,39 @@
     return text.length > 80 ? `${text.slice(0, 77)}...` : text;
   }
 
-  bootStatusContent();
+  async function start(settings = {}) {
+    if (!settings?.enabled || !settings?.statusWidget) return stop();
+    if (active) return;
+    active = true;
+    bootStatusContent();
+  }
+
+  async function update(settings = {}) {
+    if (settings?.enabled && settings?.statusWidget) return start(settings);
+    return stop();
+  }
+
+  async function stop() {
+    active = false;
+    root.clearTimeout(bootTimer);
+    root.clearTimeout(restoreTimer);
+    root.document?.removeEventListener?.("DOMContentLoaded", startStatusNow);
+    removeStatusBox();
+    restoreObserver?.disconnect?.();
+    restoreObserver = null;
+    delete root.__GladiatusArenaStatusRestoreObserver;
+    const listener = root.__GladiatusArenaStatusBoxListener;
+    if (listener && chrome.storage?.onChanged) chrome.storage.onChanged.removeListener(listener);
+    delete root.__GladiatusArenaStatusBoxListener;
+  }
+
+  root.GladiatusArenaStatusFeature = {
+    version: VERSION,
+    start,
+    update,
+    stop,
+    getStatus() {
+      return { active, hasPanel: Boolean(root.document?.getElementById?.(STATUS_BOX_ID)) };
+    }
+  };
 })();
