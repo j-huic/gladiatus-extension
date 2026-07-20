@@ -1,0 +1,30 @@
+{
+  "manifest_version": 3,
+  "name": "Gladiatus Guild Market Helper (Unofficial)",
+  "description": "Suggests and explicitly applies Mini-Pumpkin stack prices on the Gladiatus Guild Market.",
+  "version": "1.0.0",
+  "permissions": ["storage", "scripting"],
+  "host_permissions": ["https://*.gladiatus.gameforge.com/game/index.php*"],
+  "action": {
+    "default_title": "Guild Market Helper",
+    "default_popup": "popup.html"
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://*.gladiatus.gameforge.com/game/index.php*"],
+      "include_globs": ["*://*.gladiatus.gameforge.com/game/index.php*mod=guildMarket*"],
+      "js": ["guild-market-core.js"],
+      "run_at": "document_idle",
+      "world": "MAIN"
+    },
+    {
+      "matches": ["https://*.gladiatus.gameforge.com/game/index.php*"],
+      "include_globs": ["*://*.gladiatus.gameforge.com/game/index.php*mod=guildMarket*"],
+      "js": ["settings.js", "guild-market-content.js", "runtime.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}

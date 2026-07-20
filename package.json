@@ -1,0 +1,8 @@
+{
+  "name": "gladiatus-helper-local",
+  "private": true,
+  "scripts": {
+    "build:guild-market": "node scripts/build-guild-market.js",
+    "test:guild-market-build": "node guild-market-build.test.js && node guild-market.test.js"
+  }
+}

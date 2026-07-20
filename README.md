@@ -21,6 +21,29 @@ On a fresh installation all three features are off until they are selected in on
 5. Open the popup, choose the helpers you want, and finish onboarding.
 6. Open an auction, arena, or guild-market page and use its enabled helper.
 
+## Guild-Market-Only Release
+
+The public release can be built as a physically separate, single-purpose extension. This artifact contains only the Mini-Pumpkin Guild Market suggestion/Apply flow; it does not package the auction, arena, scanner, simulation, diagnostics, or generic popup modules.
+
+```sh
+npm run build:guild-market
+```
+
+The command creates:
+
+- `dist/guild-market/` for **Load unpacked** testing;
+- `dist/gladiatus-guild-market-1.0.0.zip` as the reproducible release-code ZIP.
+
+The guild-only popup has one enable switch and one unit-price field. Fresh installs default to off. If this package updates the full extension under the same extension ID, it imports only the existing Mini-Pumpkin enabled state and unit price into the dedicated `glad-guild-market-settings-v1` record. Other stored feature data is left untouched but no code capable of using it is included in the artifact.
+
+Verify the allowlisted package boundary with:
+
+```sh
+npm run test:guild-market-build
+```
+
+The release-specific privacy text is in `guild-only/PRIVACY.md`. Before an actual Chrome Web Store upload, add the final 128×128 PNG extension icon to this allowlist and prepare the required listing imagery; those brand assets are intentionally not fabricated by the code build. Chrome's current Web Store guidance requires the icon to be present in the uploaded ZIP.
+
 ## Notes
 
 - Open the extension popup on an auction page and click `Scan auction` to fetch all auction categories with your current name, minimum-level, and quality filters.
@@ -74,6 +97,7 @@ node background.test.js
 node arena-lifecycle.test.js
 node tooltip-parser.test.js
 node guild-market.test.js
+node guild-market-build.test.js
 node architecture.test.js
 node log.test.js
 ```

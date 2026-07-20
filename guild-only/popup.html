@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Gladiatus Guild Market Helper</title>
+  <link rel="stylesheet" href="popup.css">
+  <script src="settings.js" defer></script>
+  <script src="popup.js" defer></script>
+</head>
+<body>
+  <main>
+    <p class="eyebrow">Unofficial Gladiatus extension</p>
+    <h1>Guild Market Helper</h1>
+    <p class="intro">Suggest a price for staged Mini-Pumpkin stacks using your chosen per-item value.</p>
+
+    <section class="card" aria-labelledby="feature-title">
+      <div class="feature-heading">
+        <div>
+          <h2 id="feature-title">Mini-Pumpkin pricing</h2>
+          <p>Shows the stack calculation beside the Guild Market price field.</p>
+        </div>
+        <button id="enabled-switch" class="switch" type="button" role="switch" aria-checked="false" aria-label="Enable Mini-Pumpkin price suggestions" disabled>
+          <span class="switch-track" aria-hidden="true"><span class="switch-thumb"></span></span>
+          <span class="switch-label">Off</span>
+        </button>
+      </div>
+
+      <form id="price-form">
+        <label for="unit-price">Gold per Mini-Pumpkin</label>
+        <div class="price-row">
+          <input id="unit-price" name="unitPrice" type="text" inputmode="numeric" pattern="[0-9]+" autocomplete="off" required aria-describedby="price-help" disabled>
+          <button id="save-price" class="primary" type="submit" disabled>Save price</button>
+        </div>
+        <p id="price-help" class="help">Use a positive whole number. The default is 100,000 gold.</p>
+      </form>
+    </section>
+
+    <section class="safety" aria-labelledby="safety-title">
+      <h2 id="safety-title">What it does</h2>
+      <p>After the game stages a matching item, the helper displays the quantity × unit price calculation. Apply fills only the price field and recalculates the fee. It never lists the item for you.</p>
+    </section>
+
+    <p id="status" class="status" role="status" aria-live="polite"></p>
+  </main>
+</body>
+</html>
