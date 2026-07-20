@@ -1,7 +1,7 @@
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
-const path = require("node:path");
 const vm = require("node:vm");
+const { repoFile } = require("./test-paths.js");
 
 function fakeStorage(seed = {}) {
   const state = { ...seed };
@@ -82,7 +82,7 @@ async function run() {
   context.globalThis = context;
   vm.createContext(context);
   for (const file of ["helper-settings.js", "feature-runtime.js"]) {
-    vm.runInContext(fs.readFileSync(path.join(__dirname, file), "utf8"), context, { filename: file });
+    vm.runInContext(fs.readFileSync(repoFile(file), "utf8"), context, { filename: file });
   }
 
   await settle(context.GladiatusFeatureRuntime);

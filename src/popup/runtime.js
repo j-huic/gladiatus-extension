@@ -136,31 +136,31 @@ export async function ensureFeatureContentScript(tabId, featureId) {
 
   const filesByFeature = {
     auction: [
-      "helper-security.js",
-      "helper-settings.js",
-      "log-core.js",
-      "log-setup.js",
-      "auction-schema.js",
-      "score-model.js",
-      "auction-model.js",
-      "tooltip-parser.js",
-      "auction-core.js",
-      "auction-content.js",
-      "feature-runtime.js"
+      "src/shared/helper-security.js",
+      "src/shared/helper-settings.js",
+      "src/shared/logging/log-core.js",
+      "src/shared/logging/log-setup.js",
+      "src/features/auction/auction-schema.js",
+      "src/shared/score-model.js",
+      "src/features/auction/auction-model.js",
+      "src/shared/tooltip-parser.js",
+      "src/features/auction/auction-core.js",
+      "src/features/auction/auction-content.js",
+      "src/runtime/feature-runtime.js"
     ],
     arena: [
-      "helper-security.js",
-      "helper-settings.js",
-      "log-core.js",
-      "log-setup.js",
-      "score-model.js",
-      "arena-core.js",
-      "arena-sim.js",
-      "arena-scan.js",
-      "arena-passive-content.js",
-      "arena-status-content.js",
-      "arena-content.js",
-      "feature-runtime.js"
+      "src/shared/helper-security.js",
+      "src/shared/helper-settings.js",
+      "src/shared/logging/log-core.js",
+      "src/shared/logging/log-setup.js",
+      "src/shared/score-model.js",
+      "src/features/arena/arena-core.js",
+      "src/features/arena/arena-sim.js",
+      "src/features/arena/arena-scan.js",
+      "src/features/arena/arena-passive-content.js",
+      "src/features/arena/arena-status-content.js",
+      "src/features/arena/arena-content.js",
+      "src/runtime/feature-runtime.js"
     ]
   };
   const files = filesByFeature[featureId];

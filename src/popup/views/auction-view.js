@@ -1,4 +1,4 @@
-import { MODEL, SCHEMA, nodes, saveStorage, setStatus } from "./runtime.js";
+import { MODEL, SCHEMA, nodes, saveStorage, setStatus } from "../runtime.js";
 import {
   ARMOR_PIECE_OPTIONS,
   DEFAULT_CONSTRAINT,
@@ -19,7 +19,7 @@ import {
   state,
   upsertDefinition,
   validateDefinition
-} from "./store.js";
+} from "../store.js";
 
 export function createAuctionView({ render, applyCurrentSortToPage }) {
   function renderPageTabs() {

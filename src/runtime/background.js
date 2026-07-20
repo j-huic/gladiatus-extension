@@ -1,6 +1,6 @@
 importScripts(
-  "helper-security.js",
-  "helper-settings.js"
+  "../shared/helper-security.js",
+  "../shared/helper-settings.js"
 );
 
 // Capture this before log setup or any other module can initialize the v1
@@ -8,17 +8,17 @@ importScripts(
 const settingsAtWorkerStart = chrome.storage.local.get("glad-helper-settings-v1");
 
 importScripts(
-  "log-core.js",
-  "log-buffer.js",
-  "log-setup.js",
-  "auction-schema.js",
-  "tooltip-parser.js",
-  "auction-core.js",
-  "score-model.js",
-  "arena-core.js",
-  "arena-sim.js",
-  "arena-background-scan.js",
-  "auction-background-scan.js"
+  "../shared/logging/log-core.js",
+  "../shared/logging/log-buffer.js",
+  "../shared/logging/log-setup.js",
+  "../features/auction/auction-schema.js",
+  "../shared/tooltip-parser.js",
+  "../features/auction/auction-core.js",
+  "../shared/score-model.js",
+  "../features/arena/arena-core.js",
+  "../features/arena/arena-sim.js",
+  "../features/arena/arena-background-scan.js",
+  "../features/auction/auction-background-scan.js"
 );
 
 const SETTINGS = self.GladiatusFeatureSettings;
@@ -27,33 +27,33 @@ const LOG_PREFIX = "[Gladiatus Background]";
 
 const FEATURE_CONTENT_FILES = Object.freeze({
   auction: [
-    "helper-security.js",
-    "helper-settings.js",
-    "auction-schema.js",
-    "tooltip-parser.js",
-    "score-model.js",
-    "auction-model.js",
-    "auction-core.js",
-    "auction-content.js",
-    "feature-runtime.js"
+    "src/shared/helper-security.js",
+    "src/shared/helper-settings.js",
+    "src/features/auction/auction-schema.js",
+    "src/shared/tooltip-parser.js",
+    "src/shared/score-model.js",
+    "src/features/auction/auction-model.js",
+    "src/features/auction/auction-core.js",
+    "src/features/auction/auction-content.js",
+    "src/runtime/feature-runtime.js"
   ],
   arena: [
-    "helper-security.js",
-    "helper-settings.js",
-    "score-model.js",
-    "arena-core.js",
-    "arena-sim.js",
-    "arena-scan.js",
-    "arena-passive-content.js",
-    "arena-status-content.js",
-    "arena-content.js",
-    "feature-runtime.js"
+    "src/shared/helper-security.js",
+    "src/shared/helper-settings.js",
+    "src/shared/score-model.js",
+    "src/features/arena/arena-core.js",
+    "src/features/arena/arena-sim.js",
+    "src/features/arena/arena-scan.js",
+    "src/features/arena/arena-passive-content.js",
+    "src/features/arena/arena-status-content.js",
+    "src/features/arena/arena-content.js",
+    "src/runtime/feature-runtime.js"
   ],
   guildMarket: [
-    "helper-security.js",
-    "helper-settings.js",
-    "guild-market-content.js",
-    "feature-runtime.js"
+    "src/shared/helper-security.js",
+    "src/shared/helper-settings.js",
+    "src/features/guild-market/guild-market-content.js",
+    "src/runtime/feature-runtime.js"
   ]
 });
 

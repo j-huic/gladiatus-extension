@@ -9,15 +9,16 @@ const defaultOutputDir = path.join(rootDir, "dist", "guild-market");
 const fixedTimestamp = new Date("2020-01-01T00:00:00.000Z");
 const markerSuffix = ".gladiatus-guild-market-build-owner";
 const files = Object.freeze([
-  ["guild-only/manifest.json", "manifest.json"],
-  ["guild-only/background.js", "background.js"],
-  ["guild-only/settings.js", "settings.js"],
-  ["guild-only/runtime.js", "runtime.js"],
-  ["guild-only/popup.html", "popup.html"],
-  ["guild-only/popup.css", "popup.css"],
-  ["guild-only/popup.js", "popup.js"],
-  ["guild-market-core.js", "guild-market-core.js"],
-  ["guild-market-content.js", "guild-market-content.js"]
+  ["targets/guild-market/manifest.json", "manifest.json"],
+  ["targets/guild-market/background.js", "background.js"],
+  ["targets/guild-market/settings.js", "settings.js"],
+  ["targets/guild-market/runtime.js", "runtime.js"],
+  ["targets/guild-market/popup.html", "popup.html"],
+  ["targets/guild-market/popup.css", "popup.css"],
+  ["targets/guild-market/popup.js", "popup.js"],
+  ["targets/guild-market/icon128.png", "icon128.png"],
+  ["src/features/guild-market/guild-market-core.js", "guild-market-core.js"],
+  ["src/features/guild-market/guild-market-content.js", "guild-market-content.js"]
 ]);
 
 function parseArguments(argv) {

@@ -12,14 +12,36 @@ The extension does not bid, buy, fight, submit market listings, or contact devel
 
 On a fresh installation all three features are off until they are selected in onboarding. They can be enabled, configured, or disabled independently from the popup. Disabling a feature keeps its settings and cached data until the user clears them.
 
-## Load In Chrome
+## Build And Load In Chrome
 
-1. Open `chrome://extensions`.
-2. Enable `Developer mode`.
-3. Click `Load unpacked`.
-4. Select this folder: `/Users/jankohuic/dev/gladiatus`.
-5. Open the popup, choose the helpers you want, and finish onboarding.
-6. Open an auction, arena, or guild-market page and use its enabled helper.
+Build both Chrome-loadable targets from the repository root:
+
+```sh
+npm run build
+```
+
+Then open `chrome://extensions`, enable Developer mode, click **Load unpacked**, and select one of:
+
+- `dist/full/` for the private three-feature development build;
+- `dist/guild-market/` for the single-purpose Guild Market release candidate.
+
+The repository root is source and tooling, not a loadable extension package.
+
+## Project Layout
+
+```text
+src/
+  features/          auction, arena, and guild-market feature code
+  shared/            settings, security, parsing, styles, and logging
+  runtime/           full-build background worker and feature runtime
+  popup/             full-build popup shell and views
+targets/
+  full/              full extension manifest
+  guild-market/      narrow release manifest and dedicated shell
+scripts/             deterministic target builders
+tests/               lifecycle, boundary, safety, and build tests
+dist/                generated Chrome-loadable artifacts
+```
 
 ## Guild-Market-Only Release
 
@@ -42,7 +64,7 @@ Verify the allowlisted package boundary with:
 npm run test:guild-market-build
 ```
 
-The release-specific privacy text is in `guild-only/PRIVACY.md`. Before an actual Chrome Web Store upload, add the final 128×128 PNG extension icon to this allowlist and prepare the required listing imagery; those brand assets are intentionally not fabricated by the code build. Chrome's current Web Store guidance requires the icon to be present in the uploaded ZIP.
+The release-specific privacy text is in `targets/guild-market/PRIVACY.md`. The 128×128 extension icon is included in the allowlisted package; store listing screenshots and promotional imagery still need to be prepared before submission.
 
 ## Notes
 
@@ -90,21 +112,14 @@ The schema owns stat keys, display labels, stable auction category ids, and stor
 ## Architecture Checks
 
 ```sh
-for file in *.js popup/*.js sim-lab/*.js; do node --check "$file"; done
-node helper-settings.test.js
-node feature-runtime.test.js
-node background.test.js
-node arena-lifecycle.test.js
-node tooltip-parser.test.js
-node guild-market.test.js
-node guild-market-build.test.js
-node architecture.test.js
-node log.test.js
+npm test
+npm run build
+git diff --check
 ```
 
 ## Adding Presets And Filters
 
-Auction groups, score formulas, and filters are isolated in `auction-model.js`. Stable stat/category/storage contracts are isolated in `auction-schema.js`. The popup and auction content script consume those definitions instead of duplicating formulas.
+Auction groups, score formulas, and filters are isolated in `src/features/auction/auction-model.js`. Stable stat/category/storage contracts are isolated in `src/features/auction/auction-schema.js`. The popup and auction content script consume those definitions instead of duplicating formulas.
 
 Custom filters created in the popup use this shape:
 

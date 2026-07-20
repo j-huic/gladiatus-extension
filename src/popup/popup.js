@@ -1,7 +1,7 @@
-import { createArenaView } from "./popup/arena-view.js";
-import { createAuctionView } from "./popup/auction-view.js";
-import { createDevLogView } from "./popup/dev-log-view.js";
-import { createSettingsView } from "./popup/settings-view.js";
+import { createArenaView } from "./views/arena-view.js";
+import { createAuctionView } from "./views/auction-view.js";
+import { createDevLogView } from "./views/dev-log-view.js";
+import { createSettingsView } from "./views/settings-view.js";
 import {
   ARENA,
   AUCTION_CONTENT_MESSAGES,
@@ -19,7 +19,7 @@ import {
   sendAuctionScanMessage,
   sendTabMessage,
   setStatus
-} from "./popup/runtime.js";
+} from "./runtime.js";
 import {
   FILTER_VALUES_STORAGE_KEY,
   POPUP_STATE_KEY,
@@ -37,7 +37,7 @@ import {
   normalizePopupState,
   normalizeScanResult,
   state
-} from "./popup/store.js";
+} from "./store.js";
 
 const FALLBACK_ARENA_STORAGE_KEYS = {
   formulas: "glad-arena-formulas-v1",

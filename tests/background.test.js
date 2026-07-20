@@ -2,8 +2,7 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 const vm = require("node:vm");
-
-const rootDir = __dirname;
+const { repoFile } = require("./test-paths.js");
 const SETTINGS_KEY = "glad-helper-settings-v1";
 
 function clone(value) {
@@ -113,12 +112,14 @@ function makeBackground(seed = {}) {
   context.self = context;
   context.globalThis = context;
   vm.createContext(context);
+  const backgroundFile = repoFile("background.js");
+  const backgroundDirectory = path.dirname(backgroundFile);
   context.importScripts = (...files) => {
     for (const file of files) {
-      vm.runInContext(fs.readFileSync(path.join(rootDir, file), "utf8"), context, { filename: file });
+      vm.runInContext(fs.readFileSync(path.resolve(backgroundDirectory, file), "utf8"), context, { filename: file });
     }
   };
-  vm.runInContext(fs.readFileSync(path.join(rootDir, "background.js"), "utf8"), context, {
+  vm.runInContext(fs.readFileSync(backgroundFile, "utf8"), context, {
     filename: "background.js"
   });
 
@@ -291,10 +292,10 @@ async function run() {
     const repaired = await app.dispatch({ type: "GLAD_FEATURE_REPAIR", feature: "guildMarket" });
     assert.equal(repaired.ok, true);
     assert.deepEqual(app.executeCalls[0].files, [
-      "helper-security.js",
-      "helper-settings.js",
-      "guild-market-content.js",
-      "feature-runtime.js"
+      "src/shared/helper-security.js",
+      "src/shared/helper-settings.js",
+      "src/features/guild-market/guild-market-content.js",
+      "src/runtime/feature-runtime.js"
     ]);
   }
 

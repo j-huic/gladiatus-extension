@@ -3,10 +3,8 @@
 // be verified in isolation. Run with: node log.test.js
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
-const path = require("node:path");
 const vm = require("node:vm");
-
-const rootDir = __dirname;
+const { repoFile } = require("./test-paths.js");
 
 // Values returned from the vm realm carry that realm's prototypes, which trips
 // assert's strict deepEqual. Compare structure via JSON for cross-realm values.
@@ -20,7 +18,7 @@ function loadModules(files, overrides = {}) {
   context.self = context;
   vm.createContext(context);
   for (const file of files) {
-    vm.runInContext(fs.readFileSync(path.join(rootDir, file), "utf8"), context, { filename: file });
+    vm.runInContext(fs.readFileSync(repoFile(file), "utf8"), context, { filename: file });
   }
   return context;
 }

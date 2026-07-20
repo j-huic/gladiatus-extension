@@ -29,7 +29,7 @@ The repo is a Chrome extension for Gladiatus. Two relevant pieces already exist:
 - **Stat→combat derivation — missing locally, exists upstream.** The combat loop
   consumes *already-derived* values (`damageMin/Max`, `critChance`, `blockChance`,
   `critAvoidChance`, `maxHp`, `armourAbsorbMin/Max`). The extension obtains these by
-  **scraping the game character sheet** ([`arena-core.js:614`](../../../arena-core.js)),
+  **scraping the game character sheet** ([`arena-core.js:614`](../../../src/features/arena/arena-core.js)),
   not by computing them. Raw `strength`/`constitution` are carried on the combatant
   but unused by the loop (only dex/agi/cha/int feed hit & double-hit). So there is
   **no code path today that turns "+10 STR" into new combat primitives.**
@@ -138,7 +138,7 @@ exported self-profile JSON (glad-arena-self-profile-v1)
 ## Self-profile ingestion
 
 The extension persists the self-profile in `chrome.storage.local` under
-`glad-arena-self-profile-v1` ([`arena-core.js:15`](../../../arena-core.js)) with shape
+`glad-arena-self-profile-v1` ([`arena-core.js:15`](../../../src/features/arena/arena-core.js)) with shape
 `{ character: { stats, combat, name, level }, scannedAt, profileUrl }`.
 
 To hand it to the Node harness, export the record to `self-profile.json`:

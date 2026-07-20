@@ -251,9 +251,9 @@
     if (document.getElementById(PAGE_CORE_SCRIPT_ID)) return Promise.resolve();
     if (pageCoreLoadPromise) return pageCoreLoadPromise;
 
-    pageCoreLoadPromise = injectPageScript("auction-schema.js", PAGE_SCHEMA_SCRIPT_ID)
-      .then(() => injectPageScript("tooltip-parser.js", PAGE_TOOLTIP_SCRIPT_ID))
-      .then(() => injectPageScript("auction-core.js", PAGE_CORE_SCRIPT_ID, { gladAuctionPageBridge: "1" }));
+    pageCoreLoadPromise = injectPageScript("src/features/auction/auction-schema.js", PAGE_SCHEMA_SCRIPT_ID)
+      .then(() => injectPageScript("src/shared/tooltip-parser.js", PAGE_TOOLTIP_SCRIPT_ID))
+      .then(() => injectPageScript("src/features/auction/auction-core.js", PAGE_CORE_SCRIPT_ID, { gladAuctionPageBridge: "1" }));
 
     return pageCoreLoadPromise;
   }

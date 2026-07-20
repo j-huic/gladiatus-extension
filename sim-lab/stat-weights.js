@@ -26,9 +26,9 @@ function loadArena(extensionRoot = EXTENSION_ROOT) {
   vm.createContext(context);
 
   const files = [
-    path.join(extensionRoot, "score-model.js"),
-    path.join(extensionRoot, "arena-core.js"),
-    path.join(extensionRoot, "arena-sim.js"),
+    path.join(extensionRoot, "src/shared/score-model.js"),
+    path.join(extensionRoot, "src/features/arena/arena-core.js"),
+    path.join(extensionRoot, "src/features/arena/arena-sim.js"),
     path.join(__dirname, "stat-weights-core.js"),
   ];
   for (const file of files) {

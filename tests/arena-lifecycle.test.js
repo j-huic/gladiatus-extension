@@ -1,9 +1,7 @@
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
-const path = require("node:path");
 const vm = require("node:vm");
-
-const rootDir = __dirname;
+const { repoFile } = require("./test-paths.js");
 
 function eventTarget() {
   const listeners = new Map();
@@ -145,7 +143,7 @@ function makeHarness(url) {
 
   function load(...files) {
     for (const file of files) {
-      vm.runInContext(fs.readFileSync(path.join(rootDir, file), "utf8"), context, { filename: file });
+      vm.runInContext(fs.readFileSync(repoFile(file), "utf8"), context, { filename: file });
     }
   }
 

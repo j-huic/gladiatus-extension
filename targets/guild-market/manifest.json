@@ -5,8 +5,14 @@
   "version": "1.0.0",
   "permissions": ["storage", "scripting"],
   "host_permissions": ["https://*.gladiatus.gameforge.com/game/index.php*"],
+  "icons": {
+    "128": "icon128.png"
+  },
   "action": {
     "default_title": "Guild Market Helper",
+    "default_icon": {
+      "128": "icon128.png"
+    },
     "default_popup": "popup.html"
   },
   "background": {

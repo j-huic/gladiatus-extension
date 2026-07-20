@@ -6,8 +6,8 @@ const os = require("node:os");
 const path = require("node:path");
 const vm = require("node:vm");
 
-const rootDir = __dirname;
-const buildTool = require("./scripts/build-guild-market.js");
+const rootDir = path.resolve(__dirname, "..");
+const buildTool = require("../scripts/build-guild-market.js");
 
 function clone(value) {
   return value === undefined ? undefined : JSON.parse(JSON.stringify(value));
@@ -602,11 +602,11 @@ async function main() {
     assert.equal(sha256(zipA), firstZipHash, "an owned target must rebuild safely and reproducibly");
 
     assert.throws(
-      () => buildTool.copyReleaseFiles(path.join(rootDir, "guild-only")),
+      () => buildTool.copyReleaseFiles(path.join(rootDir, "targets", "guild-market")),
       /unsafe output directory/,
       "the build must never accept a source directory as its output"
     );
-    assert.equal(fs.existsSync(path.join(rootDir, "guild-only", "manifest.json")), true);
+    assert.equal(fs.existsSync(path.join(rootDir, "targets", "guild-market", "manifest.json")), true);
     const unownedDirectory = path.join(tempRoot, "unowned-directory");
     fs.mkdirSync(unownedDirectory);
     fs.writeFileSync(path.join(unownedDirectory, "keep.txt"), "keep", "utf8");
@@ -622,6 +622,12 @@ async function main() {
     assert.deepEqual(manifest.permissions, ["storage", "scripting"]);
     assert.ok(manifest.description.length <= 132);
     assert.deepEqual(manifest.host_permissions, ["https://*.gladiatus.gameforge.com/game/index.php*"]);
+    assert.deepEqual(manifest.icons, { "128": "icon128.png" });
+    assert.deepEqual(manifest.action.default_icon, { "128": "icon128.png" });
+    const icon = fs.readFileSync(path.join(packageA, "icon128.png"));
+    assert.equal(icon.subarray(1, 4).toString("ascii"), "PNG");
+    assert.equal(icon.readUInt32BE(16), 128);
+    assert.equal(icon.readUInt32BE(20), 128);
     assert.deepEqual(manifest.background, { service_worker: "background.js" });
     assert.equal(manifest.web_accessible_resources, undefined);
     assert.deepEqual(manifest.content_scripts.map((entry) => entry.js), [
@@ -644,6 +650,7 @@ async function main() {
     }
 
     const packageText = expectedFiles
+      .filter((file) => /\.(?:js|json|html|css)$/.test(file))
       .map((file) => fs.readFileSync(path.join(packageA, file), "utf8"))
       .join("\n");
     for (const [label, pattern] of [

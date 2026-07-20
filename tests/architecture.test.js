@@ -2,8 +2,17 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 const vm = require("node:vm");
+const { rootDir, repoFile } = require("./test-paths.js");
 
-const rootDir = __dirname;
+function recursiveFiles(directory) {
+  const files = [];
+  for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
+    const absolute = path.join(directory, entry.name);
+    if (entry.isDirectory()) files.push(...recursiveFiles(absolute));
+    else if (entry.isFile()) files.push(absolute);
+  }
+  return files;
+}
 
 function makeDocument(forms = []) {
   return {
@@ -81,7 +90,7 @@ function loadGlobals() {
   vm.createContext(context);
 
   for (const file of ["auction-schema.js", "score-model.js", "auction-model.js", "tooltip-parser.js", "auction-core.js", "arena-core.js", "arena-sim.js"]) {
-    vm.runInContext(fs.readFileSync(path.join(rootDir, file), "utf8"), context, { filename: file });
+    vm.runInContext(fs.readFileSync(repoFile(file), "utf8"), context, { filename: file });
   }
 
   return {
@@ -136,7 +145,7 @@ function makeBackgroundScannerContext(options = {}) {
   vm.createContext(context);
 
   for (const file of ["score-model.js", "arena-core.js", "arena-sim.js", "arena-background-scan.js"]) {
-    vm.runInContext(fs.readFileSync(path.join(rootDir, file), "utf8"), context, { filename: file });
+    vm.runInContext(fs.readFileSync(repoFile(file), "utf8"), context, { filename: file });
   }
 
   return {
@@ -191,7 +200,7 @@ function makeAuctionBackgroundScannerContext(options = {}) {
   vm.createContext(context);
 
   for (const file of ["auction-schema.js", "tooltip-parser.js", "auction-core.js", "auction-background-scan.js"]) {
-    vm.runInContext(fs.readFileSync(path.join(rootDir, file), "utf8"), context, { filename: file });
+    vm.runInContext(fs.readFileSync(repoFile(file), "utf8"), context, { filename: file });
   }
 
   return {
@@ -507,23 +516,23 @@ const { schema, score, model, core, arena, sim } = loadGlobals();
 }
 
 {
-  const manifest = JSON.parse(fs.readFileSync(path.join(rootDir, "manifest.json"), "utf8"));
-  const backgroundSource = fs.readFileSync(path.join(rootDir, "background.js"), "utf8");
-  const backgroundArenaSource = fs.readFileSync(path.join(rootDir, "arena-background-scan.js"), "utf8");
-  const arenaScanSource = fs.readFileSync(path.join(rootDir, "arena-scan.js"), "utf8");
-  const arenaPassiveContentSource = fs.readFileSync(path.join(rootDir, "arena-passive-content.js"), "utf8");
-  const arenaStatusContentSource = fs.readFileSync(path.join(rootDir, "arena-status-content.js"), "utf8");
-  const popupSource = fs.readFileSync(path.join(rootDir, "popup.js"), "utf8");
-  const popupRuntimeSource = fs.readFileSync(path.join(rootDir, "popup/runtime.js"), "utf8");
-  const popupStoreSource = fs.readFileSync(path.join(rootDir, "popup/store.js"), "utf8");
+  const manifest = JSON.parse(fs.readFileSync(repoFile("targets/full/manifest.json"), "utf8"));
+  const backgroundSource = fs.readFileSync(repoFile("background.js"), "utf8");
+  const backgroundArenaSource = fs.readFileSync(repoFile("arena-background-scan.js"), "utf8");
+  const arenaScanSource = fs.readFileSync(repoFile("arena-scan.js"), "utf8");
+  const arenaPassiveContentSource = fs.readFileSync(repoFile("arena-passive-content.js"), "utf8");
+  const arenaStatusContentSource = fs.readFileSync(repoFile("arena-status-content.js"), "utf8");
+  const popupSource = fs.readFileSync(repoFile("popup.js"), "utf8");
+  const popupRuntimeSource = fs.readFileSync(repoFile("src/popup/runtime.js"), "utf8");
+  const popupStoreSource = fs.readFileSync(repoFile("src/popup/store.js"), "utf8");
   const mainEntry = manifest.content_scripts.find((entry) => entry.world === "MAIN");
   const isolatedEntries = manifest.content_scripts.filter((entry) => entry.world !== "MAIN");
 
   assert.equal(manifest.name, "Gladiatus Helper (Unofficial)");
   assert.equal(manifest.permissions.includes("downloads"), false);
-  assert.equal(manifest.background.service_worker, "background.js");
-  assert.match(backgroundSource, /"helper-security\.js"/);
-  assert.match(backgroundSource, /"helper-settings\.js"/);
+  assert.equal(manifest.background.service_worker, "src/runtime/background.js");
+  assert.match(backgroundSource, /helper-security\.js"/);
+  assert.match(backgroundSource, /helper-settings\.js"/);
   assert.match(backgroundSource, /const FEATURE_CONTENT_FILES = Object\.freeze/);
   assert.match(backgroundSource, /GLAD_FEATURE_REPAIR/);
   assert.match(backgroundSource, /FEATURE_DISABLED/);
@@ -546,68 +555,73 @@ const { schema, score, model, core, arena, sim } = loadGlobals();
   const arenaRepairFiles = repairFilesFor("arena");
   const guildRepairFiles = repairFilesFor("guildMarket");
   assert.deepEqual(auctionRepairFiles, [
-    "helper-security.js",
-    "helper-settings.js",
-    "auction-schema.js",
-    "tooltip-parser.js",
-    "score-model.js",
-    "auction-model.js",
-    "auction-core.js",
-    "auction-content.js",
-    "feature-runtime.js"
+    "src/shared/helper-security.js",
+    "src/shared/helper-settings.js",
+    "src/features/auction/auction-schema.js",
+    "src/shared/tooltip-parser.js",
+    "src/shared/score-model.js",
+    "src/features/auction/auction-model.js",
+    "src/features/auction/auction-core.js",
+    "src/features/auction/auction-content.js",
+    "src/runtime/feature-runtime.js"
   ]);
   assert.deepEqual(arenaRepairFiles, [
-    "helper-security.js",
-    "helper-settings.js",
-    "score-model.js",
-    "arena-core.js",
-    "arena-sim.js",
-    "arena-scan.js",
-    "arena-passive-content.js",
-    "arena-status-content.js",
-    "arena-content.js",
-    "feature-runtime.js"
+    "src/shared/helper-security.js",
+    "src/shared/helper-settings.js",
+    "src/shared/score-model.js",
+    "src/features/arena/arena-core.js",
+    "src/features/arena/arena-sim.js",
+    "src/features/arena/arena-scan.js",
+    "src/features/arena/arena-passive-content.js",
+    "src/features/arena/arena-status-content.js",
+    "src/features/arena/arena-content.js",
+    "src/runtime/feature-runtime.js"
   ]);
   assert.deepEqual(guildRepairFiles, [
-    "helper-security.js",
-    "helper-settings.js",
-    "guild-market-content.js",
-    "feature-runtime.js"
+    "src/shared/helper-security.js",
+    "src/shared/helper-settings.js",
+    "src/features/guild-market/guild-market-content.js",
+    "src/runtime/feature-runtime.js"
   ]);
-  assert.equal(auctionRepairFiles.some((file) => file.startsWith("arena-") || file.startsWith("guild-market")), false);
-  assert.equal(arenaRepairFiles.some((file) => file.startsWith("auction-") || file.startsWith("guild-market")), false);
-  assert.equal(guildRepairFiles.some((file) => file.startsWith("auction-") || file.startsWith("arena-")), false);
-  assert.equal(auctionRepairFiles.includes("auction-background-scan.js"), false);
-  assert.equal(arenaRepairFiles.includes("arena-background-scan.js"), false);
+  assert.equal(auctionRepairFiles.some((file) => file.includes("/arena/") || file.includes("/guild-market/")), false);
+  assert.equal(arenaRepairFiles.some((file) => file.includes("/auction/") || file.includes("/guild-market/")), false);
+  assert.equal(guildRepairFiles.some((file) => file.includes("/auction/") || file.includes("/arena/")), false);
+  assert.equal(auctionRepairFiles.includes("src/features/auction/auction-background-scan.js"), false);
+  assert.equal(arenaRepairFiles.includes("src/features/arena/arena-background-scan.js"), false);
 
-  assert.deepEqual(mainEntry.js, ["auction-schema.js", "tooltip-parser.js", "auction-core.js", "guild-market-core.js"]);
+  assert.deepEqual(mainEntry.js, [
+    "src/features/auction/auction-schema.js",
+    "src/shared/tooltip-parser.js",
+    "src/features/auction/auction-core.js",
+    "src/features/guild-market/guild-market-core.js"
+  ]);
   assert.equal(isolatedEntries.length, 1);
   assert.deepEqual(isolatedEntries[0].js, [
-    "helper-security.js",
-    "helper-settings.js",
-    "log-core.js",
-    "log-setup.js",
-    "auction-schema.js",
-    "tooltip-parser.js",
-    "score-model.js",
-    "auction-model.js",
-    "auction-core.js",
-    "arena-core.js",
-    "arena-sim.js",
-    "arena-scan.js",
-    "arena-passive-content.js",
-    "arena-status-content.js",
-    "guild-market-content.js",
-    "auction-content.js",
-    "arena-content.js",
-    "feature-runtime.js"
+    "src/shared/helper-security.js",
+    "src/shared/helper-settings.js",
+    "src/shared/logging/log-core.js",
+    "src/shared/logging/log-setup.js",
+    "src/features/auction/auction-schema.js",
+    "src/shared/tooltip-parser.js",
+    "src/shared/score-model.js",
+    "src/features/auction/auction-model.js",
+    "src/features/auction/auction-core.js",
+    "src/features/arena/arena-core.js",
+    "src/features/arena/arena-sim.js",
+    "src/features/arena/arena-scan.js",
+    "src/features/arena/arena-passive-content.js",
+    "src/features/arena/arena-status-content.js",
+    "src/features/guild-market/guild-market-content.js",
+    "src/features/auction/auction-content.js",
+    "src/features/arena/arena-content.js",
+    "src/runtime/feature-runtime.js"
   ]);
-  assert.ok(isolatedEntries[0].js.indexOf("helper-settings.js") < isolatedEntries[0].js.indexOf("feature-runtime.js"));
-  assert.ok(isolatedEntries[0].js.indexOf("tooltip-parser.js") < isolatedEntries[0].js.indexOf("auction-core.js"));
-  assert.ok(isolatedEntries[0].js.indexOf("arena-sim.js") < isolatedEntries[0].js.indexOf("arena-scan.js"));
-  assert.ok(isolatedEntries[0].js.indexOf("arena-scan.js") < isolatedEntries[0].js.indexOf("arena-passive-content.js"));
-  assert.ok(isolatedEntries[0].js.indexOf("arena-passive-content.js") < isolatedEntries[0].js.indexOf("arena-status-content.js"));
-  assert.ok(isolatedEntries[0].js.indexOf("arena-status-content.js") < isolatedEntries[0].js.indexOf("arena-content.js"));
+  assert.ok(isolatedEntries[0].js.indexOf("src/shared/helper-settings.js") < isolatedEntries[0].js.indexOf("src/runtime/feature-runtime.js"));
+  assert.ok(isolatedEntries[0].js.indexOf("src/shared/tooltip-parser.js") < isolatedEntries[0].js.indexOf("src/features/auction/auction-core.js"));
+  assert.ok(isolatedEntries[0].js.indexOf("src/features/arena/arena-sim.js") < isolatedEntries[0].js.indexOf("src/features/arena/arena-scan.js"));
+  assert.ok(isolatedEntries[0].js.indexOf("src/features/arena/arena-scan.js") < isolatedEntries[0].js.indexOf("src/features/arena/arena-passive-content.js"));
+  assert.ok(isolatedEntries[0].js.indexOf("src/features/arena/arena-passive-content.js") < isolatedEntries[0].js.indexOf("src/features/arena/arena-status-content.js"));
+  assert.ok(isolatedEntries[0].js.indexOf("src/features/arena/arena-status-content.js") < isolatedEntries[0].js.indexOf("src/features/arena/arena-content.js"));
   assert.match(arenaScanSource, /GLAD_ARENA_REFRESH_SELF_PROFILE/);
   assert.match(backgroundSource, /GLAD_ARENA_REFRESH_SELF_PROFILE/);
   assert.match(popupRuntimeSource, /function refreshArenaSelfProfile/);
@@ -638,7 +652,7 @@ const { schema, score, model, core, arena, sim } = loadGlobals();
   assert.match(arenaStatusContentSource, /GladiatusArenaStatusFeature/);
   assert.match(arenaStatusContentSource, /\bstart\b/);
   assert.match(arenaStatusContentSource, /\bstop\b/);
-  const arenaContentSource = fs.readFileSync(path.join(rootDir, "arena-content.js"), "utf8");
+  const arenaContentSource = fs.readFileSync(repoFile("arena-content.js"), "utf8");
   assert.match(arenaContentSource, /__GladiatusArenaContentBootstrapped/);
   assert.match(arenaContentSource, /GLAD_ARENA_BOOT_V2/);
   assert.match(arenaContentSource, /function scheduleArenaBootForLocation/);
@@ -655,16 +669,16 @@ const { schema, score, model, core, arena, sim } = loadGlobals();
   assert.match(backgroundArenaSource, /console\.warn\(LOG_PREFIX/);
   assert.match(popupRuntimeSource, /ensureFeatureContentScript\(tab\.id, "auction"\)/);
   assert.match(popupRuntimeSource, /ensureFeatureContentScript\(tab\.id, "arena"\)/);
-  assert.ok(popupRuntimeSource.indexOf("\"arena-scan.js\"") < popupRuntimeSource.indexOf("\"arena-passive-content.js\""));
-  assert.ok(popupRuntimeSource.indexOf("\"arena-passive-content.js\"") < popupRuntimeSource.indexOf("\"arena-status-content.js\""));
-  assert.ok(popupRuntimeSource.indexOf("\"arena-status-content.js\"") < popupRuntimeSource.indexOf("\"arena-content.js\""));
-  assert.equal(fs.existsSync(path.join(rootDir, "content.js")), false);
-  assert.equal(fs.existsSync(path.join(rootDir, "arena-fight.js")), false);
-  assert.equal(fs.existsSync(path.join(rootDir, "arena-header-button.js")), false);
+  assert.ok(popupRuntimeSource.indexOf("src/features/arena/arena-scan.js") < popupRuntimeSource.indexOf("src/features/arena/arena-passive-content.js"));
+  assert.ok(popupRuntimeSource.indexOf("src/features/arena/arena-passive-content.js") < popupRuntimeSource.indexOf("src/features/arena/arena-status-content.js"));
+  assert.ok(popupRuntimeSource.indexOf("src/features/arena/arena-status-content.js") < popupRuntimeSource.indexOf("src/features/arena/arena-content.js"));
+  assert.equal(fs.existsSync(repoFile("src/features/auction/content.js")), false);
+  assert.equal(fs.existsSync(repoFile("src/features/arena/arena-fight.js")), false);
+  assert.equal(fs.existsSync(repoFile("src/features/arena/arena-header-button.js")), false);
 
-  const auctionContentSource = fs.readFileSync(path.join(rootDir, "auction-content.js"), "utf8");
-  const guildContentSource = fs.readFileSync(path.join(rootDir, "guild-market-content.js"), "utf8");
-  const featureRuntimeSource = fs.readFileSync(path.join(rootDir, "feature-runtime.js"), "utf8");
+  const auctionContentSource = fs.readFileSync(repoFile("auction-content.js"), "utf8");
+  const guildContentSource = fs.readFileSync(repoFile("guild-market-content.js"), "utf8");
+  const featureRuntimeSource = fs.readFileSync(repoFile("feature-runtime.js"), "utf8");
   for (const [source, controllerName] of [
     [auctionContentSource, "GladiatusAuctionFeature"],
     [arenaContentSource, "GladiatusArenaFeature"],
@@ -685,35 +699,35 @@ const { schema, score, model, core, arena, sim } = loadGlobals();
     ...manifest.content_scripts.flatMap((entry) => [...(entry.js || []), ...(entry.css || [])]),
     ...manifest.web_accessible_resources.flatMap((entry) => entry.resources || []),
     manifest.background.service_worker,
-    "auction-background-scan.js",
-    "arena-background-scan.js",
-    "arena-sim.js",
-    "arena-passive-content.js",
-    "arena-status-content.js",
-    "guild-market-content.js",
-    "helper-security.js",
-    "helper-settings.js",
-    "feature-runtime.js",
-    "tooltip-parser.js",
-    "popup.js",
-    "popup/runtime.js",
-    "popup/store.js",
-    "popup/settings-view.js",
-    "popup/auction-view.js",
-    "popup/arena-view.js"
+    "src/features/auction/auction-background-scan.js",
+    "src/features/arena/arena-background-scan.js",
+    "src/features/arena/arena-sim.js",
+    "src/features/arena/arena-passive-content.js",
+    "src/features/arena/arena-status-content.js",
+    "src/features/guild-market/guild-market-content.js",
+    "src/shared/helper-security.js",
+    "src/shared/helper-settings.js",
+    "src/runtime/feature-runtime.js",
+    "src/shared/tooltip-parser.js",
+    "src/popup/popup.js",
+    "src/popup/runtime.js",
+    "src/popup/store.js",
+    "src/popup/views/settings-view.js",
+    "src/popup/views/auction-view.js",
+    "src/popup/views/arena-view.js"
   ];
   for (const file of referencedFiles) {
-    assert.equal(fs.existsSync(path.join(rootDir, file)), true, `${file} is referenced but missing`);
+    assert.equal(fs.existsSync(repoFile(file)), true, `${file} is referenced but missing`);
   }
 
-  const popupHtml = fs.readFileSync(path.join(rootDir, "popup.html"), "utf8");
+  const popupHtml = fs.readFileSync(repoFile("popup.html"), "utf8");
   assert.match(popupHtml, /<nav\s+id="app-nav"/);
   assert.match(popupHtml, />Home<\/button>/);
   assert.match(popupHtml, />Settings<\/button>/);
-  assert.match(popupHtml, /<script\s+src="helper-security\.js"><\/script>/);
-  assert.match(popupHtml, /<script\s+src="helper-settings\.js"><\/script>/);
-  assert.match(popupHtml, /<script\s+src="auction-core\.js"><\/script>/);
-  assert.match(popupHtml, /<script\s+src="arena-sim\.js"><\/script>/);
+  assert.match(popupHtml, /<script\s+src="\.\.\/shared\/helper-security\.js"><\/script>/);
+  assert.match(popupHtml, /<script\s+src="\.\.\/shared\/helper-settings\.js"><\/script>/);
+  assert.match(popupHtml, /<script\s+src="\.\.\/features\/auction\/auction-core\.js"><\/script>/);
+  assert.match(popupHtml, /<script\s+src="\.\.\/features\/arena\/arena-sim\.js"><\/script>/);
   assert.match(popupHtml, /<script\s+type="module"\s+src="popup\.js"><\/script>/);
   assert.ok(popupHtml.indexOf("tooltip-parser.js") < popupHtml.indexOf("auction-core.js"));
 
@@ -722,21 +736,15 @@ const { schema, score, model, core, arena, sim } = loadGlobals();
   assert.match(popupStoreSource, /label: "Ranking rules"/);
   assert.doesNotMatch(popupRuntimeSource, /Missing popup dependencies/);
 
-  const packagedFiles = [
-    ...fs.readdirSync(rootDir)
-      .filter((file) => file.endsWith(".js") && !file.endsWith(".test.js"))
-      .map((file) => path.join(rootDir, file)),
-    ...fs.readdirSync(path.join(rootDir, "popup"))
-      .filter((file) => file.endsWith(".js"))
-      .map((file) => path.join(rootDir, "popup", file))
-  ];
+  const packagedFiles = recursiveFiles(repoFile("src"))
+    .filter((file) => file.endsWith(".js"));
   const packagedSources = packagedFiles
     .map((file) => fs.readFileSync(file, "utf8"))
     .join("\n");
   assert.doesNotMatch(packagedSources, /submod=doCombat|doGroupFight\.php|doArenaFight\.php|GladiatusArenaFight/);
   assert.doesNotMatch(packagedSources, /submod=(?:bid|buy|purchase|sell)|do(?:Bid|Buy|Purchase|Sell)\.php/i);
   const guildMarketSources = ["guild-market-core.js", "guild-market-content.js"]
-    .map((file) => fs.readFileSync(path.join(rootDir, file), "utf8"))
+    .map((file) => fs.readFileSync(repoFile(file), "utf8"))
     .join("\n");
   assert.doesNotMatch(guildMarketSources, /\.submit\s*\(|requestSubmit\s*\(/);
   assert.doesNotMatch(guildMarketSources, /\.click\s*\(/);
@@ -745,7 +753,7 @@ const { schema, score, model, core, arena, sim } = loadGlobals();
 async function runAuctionContentLifecycleTests() {
   const listeners = [];
   const context = makeAuctionContentContext(listeners);
-  vm.runInContext(fs.readFileSync(path.join(rootDir, "auction-content.js"), "utf8"), context, { filename: "auction-content.js" });
+  vm.runInContext(fs.readFileSync(repoFile("auction-content.js"), "utf8"), context, { filename: "auction-content.js" });
 
   assert.equal(context.__GladiatusAuctionMissingDependencyListener, undefined);
   assert.equal(context.GladiatusAuctionFeature.ready, false);
@@ -756,9 +764,9 @@ async function runAuctionContentLifecycleTests() {
   assert.equal(listeners.length, 1);
 
   for (const file of ["auction-schema.js", "score-model.js", "auction-model.js", "tooltip-parser.js", "auction-core.js"]) {
-    vm.runInContext(fs.readFileSync(path.join(rootDir, file), "utf8"), context, { filename: file });
+    vm.runInContext(fs.readFileSync(repoFile(file), "utf8"), context, { filename: file });
   }
-  vm.runInContext(fs.readFileSync(path.join(rootDir, "auction-content.js"), "utf8"), context, { filename: "auction-content.js" });
+  vm.runInContext(fs.readFileSync(repoFile("auction-content.js"), "utf8"), context, { filename: "auction-content.js" });
 
   assert.equal(context.__GladiatusAuctionMissingDependencyListener, undefined);
   assert.equal(context.GladiatusAuctionFeature.ready, true);

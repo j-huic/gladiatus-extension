@@ -1,5 +1,5 @@
-import { FEATURE_SETTINGS, featureModules, nodes, setStatus } from "./runtime.js";
-import { state } from "./store.js";
+import { FEATURE_SETTINGS, featureModules, nodes, setStatus } from "../runtime.js";
+import { state } from "../store.js";
 
 const FEATURE_DEFINITIONS = [
   {

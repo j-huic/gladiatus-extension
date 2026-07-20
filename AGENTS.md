@@ -1,6 +1,6 @@
 # Agent Notes
 
-This repo is a local Chrome MV3 extension for improving Gladiatus auction and arena workflows. Keep changes small, inspect the current code first, and preserve the separation between parsing, scoring, page injection, and popup UI.
+This repo contains source and deterministic build targets for a local Chrome MV3 extension. Keep changes small, inspect the current code first, and preserve the separation between parsing, scoring, page injection, and popup UI.
 
 ## Live Browser Work
 
@@ -27,19 +27,15 @@ This repo is a local Chrome MV3 extension for improving Gladiatus auction and ar
 
 ## Architecture
 
-- `auction-schema.js` owns stable contracts: storage keys, stat keys/labels/order, auction category ids, and group/view mapping.
-- `auction-core.js` owns website-facing logic: tooltip parsing, stat extraction, auction document loading, and scan orchestration. It exposes `window.GladiatusAuctionCore`.
-- `auction-model.js` owns scoring/filtering rules and custom definition normalization/evaluation. Add score presets and filter controls here, not in UI files.
-- `auction-content.js` owns the injected auction-page sorter, storage syncing, and the bridge from isolated content script to page-world core APIs.
-- `popup.js`, `popup/*.js`, `popup.html`, and `popup.css` own the extension popup UI, cached scan browsing, and custom filter manager.
-- `arena-core.js` owns arena opponent/profile parsing and `ArenaCharacter` scoring helpers.
-- `arena-content.js` owns arena-page opponent scanning and row annotations; `arena-passive-content.js` and `arena-status-content.js` expose optional lifecycle controllers.
-- `background.js` owns cross-origin Gladiatus profile HTML fetches for arena scans. It should stay a narrow fetch bridge, not a parser.
-- `guild-market-core.js` is an inert MAIN-world bridge; `guild-market-content.js` owns pricing rules, suggestions, and the explicit Apply UI.
-- `helper-settings.js`, `helper-security.js`, and `feature-runtime.js` own feature switches, migrations, credential-safe persistence, and lifecycle coordination.
-- `styles.css` is only for injected page UI and selectors must remain feature-scoped.
-- `manifest.json` loads page-world parsers/bridges in the MAIN world, then one deterministic isolated entry whose feature controllers remain inert until `feature-runtime.js` enables them.
-- Dev logging is a four-module diagnostics layer. `log-core.js` (`GladiatusLog`) is the facade: levels, `createLogger(source)`, pluggable sinks, credential redaction, and NDJSON serialization. `log-buffer.js` (`GladiatusLogBuffer`) is a ring buffer over `chrome.storage.session` whose single writer lives in the background. `log-drain.js` (`GladiatusLogDrain`, popup-only) reads the buffer for an explicit user-generated browser download. `log-setup.js` keeps console output quiet (warn+) and enables verbose forwarding/storage only while Settings → Diagnostics is on.
+- `src/features/auction/` owns auction contracts, parsing/scanning, scoring, content UI, and its background scan handler.
+- `src/features/arena/` owns arena parsing, simulation, scans, annotations, passive/status controllers, and its background scan handler.
+- `src/features/guild-market/` owns the inert MAIN-world bridge and isolated suggestion/Apply controller.
+- `src/shared/` owns settings, security, tooltip parsing, score primitives, feature-scoped page styles, and the diagnostics layer under `src/shared/logging/`.
+- `src/runtime/` owns the full build's background worker and feature lifecycle coordinator.
+- `src/popup/` owns the full build's popup shell, state, and feature views.
+- `targets/full/manifest.json` describes the private three-feature build. `targets/guild-market/` is a deliberately self-contained, narrow release shell.
+- `scripts/build-full.js` and `scripts/build-guild-market.js` are allowlisted builders. Chrome-loadable output belongs only under `dist/`.
+- The full manifest loads page-world parsers/bridges in the MAIN world, then deterministic isolated controllers that remain inert until the runtime enables them.
 
 ## Design Principles
 
@@ -55,17 +51,10 @@ This repo is a local Chrome MV3 extension for improving Gladiatus auction and ar
 Run these after changes:
 
 ```sh
-for file in helper-security.js helper-settings.js feature-runtime.js tooltip-parser.js auction-schema.js score-model.js auction-core.js auction-model.js auction-content.js arena-core.js arena-scan.js arena-passive-content.js arena-status-content.js arena-content.js arena-background-scan.js auction-background-scan.js guild-market-core.js guild-market-content.js background.js popup.js popup/*.js architecture.test.js log-core.js log-buffer.js log-drain.js log-setup.js log.test.js; do node --check "$file"; done
-node helper-settings.test.js
-node feature-runtime.test.js
-node background.test.js
-node arena-lifecycle.test.js
-node tooltip-parser.test.js
-node guild-market.test.js
-node architecture.test.js
-node log.test.js
-node -e "JSON.parse(require('fs').readFileSync('manifest.json','utf8')); console.log('manifest ok')"
+npm test
+npm run build
+node -e "for (const file of ['targets/full/manifest.json', 'targets/guild-market/manifest.json']) JSON.parse(require('fs').readFileSync(file, 'utf8')); console.log('manifests ok')"
 git diff --check
 ```
 
-For browser checks, reload the unpacked extension in `chrome://extensions`, refresh the Gladiatus auction page, then inspect with Chrome DevTools MCP.
+For browser checks, load or reload `dist/full/` or `dist/guild-market/` in `chrome://extensions`, refresh the relevant Gladiatus page, then inspect with Chrome DevTools MCP.

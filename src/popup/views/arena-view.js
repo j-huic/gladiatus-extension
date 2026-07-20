@@ -1,4 +1,4 @@
-import { ARENA, nodes, saveStorage, setStatus } from "./runtime.js";
+import { ARENA, nodes, saveStorage, setStatus } from "../runtime.js";
 import {
   ARENA_PAGE_DEFINITIONS,
   ARENA_UI_STATE_STORAGE_KEY,
@@ -11,7 +11,7 @@ import {
   state,
   upsertArenaFormula,
   validateArenaFormula
-} from "./store.js";
+} from "../store.js";
 
 export function createArenaView({ render, refreshSelfProfile }) {
   function renderArenaPage() {
