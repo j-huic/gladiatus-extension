@@ -1,22 +1,22 @@
 // Isolated-world guild-market pricing controller.
 //
-// Pricing rules and UI live here. The page-world bridge only observes the
-// game's marketDrop call and fills #preis after this controller sends an
-// explicit request from the Apply button.
+// Pricing rules and UI live here. After the game stages a matching item, this
+// controller immediately asks the page-world bridge to fill #preis. It never
+// submits the Guild Market form or reasserts the value after user edits.
 (() => {
   const root = typeof globalThis !== "undefined" ? globalThis : window;
-  const CONTENT_VERSION = "guild-market-content-v2";
+  const CONTENT_VERSION = "guild-market-content-v3";
   const PANEL_ID = "glad-guild-market-suggestion";
   const STYLE_ID = "glad-guild-market-style";
   const STATUS_ID = "glad-guild-market-status";
-  const APPLY_TIMEOUT_MS = 1500;
+  const FILL_TIMEOUT_MS = 1500;
   const PAGE_MESSAGES = Object.freeze({
     source: "glad-helper:guild-market-main",
     staged: "staged"
   });
   const RUNTIME_MESSAGES = Object.freeze({
     control: "GLAD_GUILD_MARKET_CONTROL",
-    apply: "GLAD_GUILD_MARKET_APPLY"
+    fill: "GLAD_GUILD_MARKET_FILL"
   });
   const DEFAULT_RULES = Object.freeze([{
     id: "mini-pumpkin",
@@ -131,7 +131,7 @@
     const validation = validateRules(sourceRules);
     return {
       enabled: raw.enabled === true,
-      mode: "suggest",
+      mode: "automatic",
       rules: validation.rules,
       ruleErrors: validation.errors
     };
@@ -180,8 +180,6 @@
       #${PANEL_ID} .glad-guild-market-note { color: #5e4c34; margin: 4px 0; }
       #${PANEL_ID} .glad-guild-market-status { min-height: 1.4em; margin-top: 4px; }
       #${PANEL_ID} .glad-guild-market-error { color: #8b1e16; }
-      #${PANEL_ID} .glad-guild-market-apply { cursor: pointer; margin-top: 4px; padding: 3px 9px; }
-      #${PANEL_ID} .glad-guild-market-apply:disabled { cursor: default; opacity: .65; }
     `;
     (doc.head || doc.documentElement)?.append?.(style);
   }
@@ -211,7 +209,7 @@
     panel = doc.createElement("section");
     panel.id = PANEL_ID;
     panel.className = "glad-guild-market-suggestion";
-    panel.setAttribute("aria-label", "Guild Market price suggestion");
+    panel.setAttribute("aria-label", "Guild Market automatic price helper");
     if (priceField?.parentNode) {
       priceField.parentNode.insertBefore(panel, priceField.nextSibling);
     } else {
@@ -244,17 +242,17 @@
   function render() {
     if (!state.started || !state.staged) {
       root.document?.getElementById?.(PANEL_ID)?.remove?.();
-      return;
+      return null;
     }
     ensureStyles();
     const panel = ensurePanel();
-    if (!panel) return;
+    if (!panel) return null;
     panel.replaceChildren();
 
     appendTextElement(panel, "div", "glad-guild-market-title", "Guild Market price helper");
     if (!state.staged.itemName) {
       appendTextElement(panel, "div", "glad-guild-market-error", "The staged item name could not be read.");
-      return;
+      return null;
     }
 
     const rule = matchRule(state.staged.itemName, state.settings.rules);
@@ -263,13 +261,13 @@
       if (state.settings.ruleErrors.length) {
         appendTextElement(panel, "div", "glad-guild-market-error", state.settings.ruleErrors[0].error);
       }
-      return;
+      return null;
     }
 
     const suggestion = calculateSuggestion(state.staged, rule);
     if (!suggestion) {
       appendTextElement(panel, "div", "glad-guild-market-error", "This stack cannot be priced safely. Check its quantity and pricing rule.");
-      return;
+      return null;
     }
 
     appendTextElement(panel, "div", "", `${state.staged.itemName} matches “${rule.itemName}”.`);
@@ -279,43 +277,37 @@
       "glad-guild-market-calculation",
       `${formatGold(suggestion.quantity)} × ${formatGold(suggestion.unitPrice)} = ${formatGold(suggestion.price)} gold`
     );
-    appendTextElement(panel, "p", "glad-guild-market-note", "Apply fills the price field only. It never lists the item.");
-
-    const apply = root.document.createElement("button");
-    apply.type = "button";
-    apply.className = "glad-guild-market-apply";
-    apply.textContent = "Apply suggested price";
-    apply.setAttribute("aria-describedby", STATUS_ID);
-    apply.addEventListener("click", () => {
-      requestApply(rule, suggestion).catch((error) => {
-        onApplied({
-          requestId: state.pending?.requestId || "",
-          ok: false,
-          error: error?.message || String(error)
-        });
-      });
-    });
-    panel.append(apply);
+    appendTextElement(panel, "p", "glad-guild-market-note", "The price field is filled automatically. Review it before listing the item.");
 
     const status = appendTextElement(panel, "div", "glad-guild-market-status", "");
     status.id = STATUS_ID;
     status.setAttribute("aria-live", "polite");
+    return { rule, suggestion };
   }
 
-  async function requestApply(rule, suggestion) {
+  function renderAndFill() {
+    const candidate = render();
+    if (!candidate) return;
+    requestFill(candidate.rule, candidate.suggestion).catch((error) => {
+      onFilled({
+        requestId: state.pending?.requestId || "",
+        ok: false,
+        error: error?.message || String(error)
+      });
+    });
+  }
+
+  async function requestFill(rule, suggestion) {
     if (!state.started || !state.staged || state.pending) return;
-    const button = root.document?.querySelector?.(`#${PANEL_ID} .glad-guild-market-apply`);
-    if (button) button.disabled = true;
-    setStatus("Applying suggestion…");
+    setStatus("Filling price automatically…");
 
     state.requestSequence += 1;
     const requestId = `guild-price-${state.requestSequence}`;
     const timer = addTimer(() => {
       if (state.pending?.requestId !== requestId) return;
       state.pending = null;
-      if (button) button.disabled = false;
-      setStatus("The page did not accept the price. Stage the item again and retry.", true);
-    }, APPLY_TIMEOUT_MS);
+      setStatus("The page did not accept the price. Stage the item again.", true);
+    }, FILL_TIMEOUT_MS);
     state.pending = { requestId, timer };
     const request = {
       requestId,
@@ -326,13 +318,13 @@
       price: suggestion.price,
       ruleId: rule.id
     };
-    const response = await sendRuntimeMessage({ type: RUNTIME_MESSAGES.apply, request });
-    if (response?.ok) onApplied({ requestId, ...(response.result || {}) });
-    else onApplied({
+    const response = await sendRuntimeMessage({ type: RUNTIME_MESSAGES.fill, request });
+    if (response?.ok) onFilled({ requestId, ...(response.result || {}) });
+    else onFilled({
       requestId,
       ok: false,
       code: response?.code || "EXTENSION_ERROR",
-      error: response?.error || "The suggested price could not be applied."
+      error: response?.error || "The price field could not be filled."
     });
   }
 
@@ -353,16 +345,14 @@
       quantity: positiveSafeInteger(staged.quantity),
       defaultPrice: String(staged.defaultPrice || "")
     };
-    render();
+    renderAndFill();
   }
 
-  function onApplied(result) {
+  function onFilled(result) {
     if (!state.started || !state.pending || result?.requestId !== state.pending.requestId) return;
     clearPending();
-    const button = root.document?.querySelector?.(`#${PANEL_ID} .glad-guild-market-apply`);
-    if (button) button.disabled = false;
-    if (result.ok) setStatus(`Filled ${formatGold(result.price)} gold. Review the listing before submitting.`);
-    else setStatus(result.error || "The suggested price could not be applied.", true);
+    if (result.ok) setStatus(`Filled ${formatGold(result.price)} gold automatically. Review before listing.`);
+    else setStatus(result.error || "The price field could not be filled.", true);
   }
 
   function attachListeners() {
@@ -401,6 +391,7 @@
     state.lifecycleGeneration += 1;
     const generation = state.lifecycleGeneration;
     state.settings = normalized;
+    clearPending();
     if (!state.started) {
       state.started = true;
       attachListeners();
@@ -412,7 +403,7 @@
       await stop();
       throw new Error(response?.error || "The guild-market page bridge could not start.");
     }
-    render();
+    renderAndFill();
     return true;
   }
 
@@ -426,13 +417,14 @@
     state.lifecycleGeneration += 1;
     const generation = state.lifecycleGeneration;
     state.settings = normalized;
+    clearPending();
     const response = await controlMain("update", normalized);
     if (!state.started || generation !== state.lifecycleGeneration) return false;
     if (!response?.ok) {
       await stop();
       throw new Error(response?.error || "The guild-market page bridge could not update.");
     }
-    render();
+    renderAndFill();
     return true;
   }
 
@@ -462,7 +454,7 @@
       started: state.started,
       hasSuggestion: Boolean(root.document?.getElementById?.(PANEL_ID)),
       hasStagedItem: Boolean(state.staged),
-      applying: Boolean(state.pending),
+      filling: Boolean(state.pending),
       validRuleCount: state.settings?.rules?.length || 0,
       ruleErrorCount: state.settings?.ruleErrors?.length || 0
     };

@@ -217,6 +217,12 @@ async function run() {
     }, guildSender());
     assert.equal(guildStartDisabled.code, "FEATURE_DISABLED");
 
+    const guildFillDisabled = await app.dispatch({
+      type: "GLAD_GUILD_MARKET_FILL",
+      request: { stageId: "stage-1", price: 2000000 }
+    }, guildSender());
+    assert.equal(guildFillDisabled.code, "FEATURE_DISABLED");
+
     const guildStopDisabled = await app.dispatch({
       type: "GLAD_GUILD_MARKET_CONTROL",
       action: "stop"
@@ -297,6 +303,21 @@ async function run() {
       "src/features/guild-market/guild-market-content.js",
       "src/runtime/feature-runtime.js"
     ]);
+    const filled = await app.dispatch({
+      type: "GLAD_GUILD_MARKET_FILL",
+      request: {
+        requestId: "fill-1",
+        stageId: "stage-1",
+        itemName: "Mini-Pumpkin",
+        quantity: 20,
+        unitPrice: 100000,
+        price: 2000000,
+        ruleId: "mini-pumpkin"
+      }
+    }, guildSender());
+    assert.equal(filled.ok, true);
+    assert.equal(app.executeCalls.at(-1).world, "MAIN");
+    assert.equal(app.executeCalls.at(-1).args[0], "fillPriceField");
   }
 
   {

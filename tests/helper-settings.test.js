@@ -57,6 +57,8 @@ async function testSettings() {
   const fresh = plain(settings.freshDefaults());
   assert.equal(fresh.onboarding.completed, false);
   assert.deepEqual(Object.values(fresh.features).map((feature) => feature.enabled), [false, false, false]);
+  assert.equal(fresh.features.arena.quickFight, true);
+  assert.equal(fresh.features.guildMarket.mode, "automatic");
   assert.equal(fresh.features.guildMarket.rules[0].pricePerUnit, 100000);
 
   const legacy = plain(settings.legacyDefaults());
@@ -64,6 +66,7 @@ async function testSettings() {
   assert.deepEqual(Object.values(legacy.features).map((feature) => feature.enabled), [true, true, true]);
   assert.equal(legacy.features.auction.applyRankingToPage, false);
   assert.equal(legacy.features.arena.passiveRefresh, false);
+  assert.equal(legacy.features.arena.quickFight, true);
 
   const normalized = plain(settings.normalize({
     version: 99,
@@ -85,6 +88,8 @@ async function testSettings() {
   assert.equal(normalized.onboarding.completed, false, "malformed booleans fall back safely");
   assert.equal(normalized.features.auction.enabled, true);
   assert.equal(normalized.features.auction.pageSorter, true);
+  assert.equal(normalized.features.arena.quickFight, true, "missing quick-fight settings migrate on");
+  assert.equal(normalized.features.guildMarket.mode, "automatic", "legacy suggest mode migrates to automatic filling");
   assert.deepEqual(normalized.features.guildMarket.rules, [
     { id: "a", itemName: "Mini Pumpkin", pricePerUnit: 250, enabled: false }
   ], "invalid and duplicate normalized rules are rejected");

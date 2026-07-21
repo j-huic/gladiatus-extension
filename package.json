@@ -6,7 +6,7 @@
     "build:all": "npm run build:full && npm run build:guild-market",
     "build:full": "node scripts/build-full.js",
     "build:guild-market": "node scripts/build-guild-market.js",
-    "test": "node tests/helper-settings.test.js && node tests/feature-runtime.test.js && node tests/background.test.js && node tests/arena-lifecycle.test.js && node tests/tooltip-parser.test.js && node tests/guild-market.test.js && node tests/full-build.test.js && node tests/guild-market-build.test.js && node tests/architecture.test.js && node tests/log.test.js && node sim-lab/stat-weights-core.test.js && node sim-lab/stat-weights.test.js",
+    "test": "node tests/helper-settings.test.js && node tests/feature-runtime.test.js && node tests/background.test.js && node tests/arena-lifecycle.test.js && node tests/arena-quick-fight.test.js && node tests/tooltip-parser.test.js && node tests/guild-market.test.js && node tests/full-build.test.js && node tests/guild-market-build.test.js && node tests/architecture.test.js && node tests/log.test.js && node sim-lab/stat-weights-core.test.js && node sim-lab/stat-weights.test.js",
     "test:guild-market-build": "node tests/guild-market-build.test.js && node tests/guild-market.test.js"
   }
 }

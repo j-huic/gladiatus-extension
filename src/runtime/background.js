@@ -45,6 +45,8 @@ const FEATURE_CONTENT_FILES = Object.freeze({
     "src/features/arena/arena-sim.js",
     "src/features/arena/arena-scan.js",
     "src/features/arena/arena-passive-content.js",
+    "src/features/arena/arena-fight.js",
+    "src/features/arena/arena-header-button.js",
     "src/features/arena/arena-status-content.js",
     "src/features/arena/arena-content.js",
     "src/runtime/feature-runtime.js"
@@ -136,10 +138,10 @@ async function handleMessage(message, sender) {
     return { ok: true, result };
   }
 
-  if (message?.type === "GLAD_GUILD_MARKET_APPLY") {
+  if (message?.type === "GLAD_GUILD_MARKET_FILL") {
     await requireFeature("guildMarket");
     validateFeaturePage(sender, "guildMarket", "Guild Market");
-    const result = await runGuildMarketMain(sender, "applySuggestedPrice", [message.request || {}]);
+    const result = await runGuildMarketMain(sender, "fillPriceField", [message.request || {}]);
     await requireFeature("guildMarket");
     return { ok: true, result: SECURITY.sanitizeForStorage(result) };
   }
@@ -241,7 +243,7 @@ function isKnownMessage(message) {
   return new Set([
     "GLAD_DEV_LOG",
     "GLAD_GUILD_MARKET_CONTROL",
-    "GLAD_GUILD_MARKET_APPLY",
+    "GLAD_GUILD_MARKET_FILL",
     "GLAD_AUCTION_FORCE_SCAN",
     "GLAD_AH_REPAIR_AUCTION_CONTENT",
     "GLAD_FEATURE_REPAIR",

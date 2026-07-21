@@ -158,6 +158,8 @@ export async function ensureFeatureContentScript(tabId, featureId) {
       "src/features/arena/arena-sim.js",
       "src/features/arena/arena-scan.js",
       "src/features/arena/arena-passive-content.js",
+      "src/features/arena/arena-fight.js",
+      "src/features/arena/arena-header-button.js",
       "src/features/arena/arena-status-content.js",
       "src/features/arena/arena-content.js",
       "src/runtime/feature-runtime.js"

@@ -3,11 +3,11 @@
 // The game's marketDrop/calcDues functions only exist in the page world. This
 // module deliberately does nothing to them when it is loaded. The isolated
 // guild-market controller starts the bridge when the feature is enabled, reads
-// the staged-item event, and may send one explicit, user-initiated price-fill
-// request. No code here submits the sell form.
+// the staged-item event, and sends one immediate price-fill request for a
+// matching rule. No code here submits the sell form or reasserts a user edit.
 (() => {
   const root = typeof globalThis !== "undefined" ? globalThis : window;
-  const CORE_VERSION = "guild-market-core-v4";
+  const CORE_VERSION = "guild-market-core-v5";
   const SELLID_SELECTOR = "#sellForm [name=\"sellid\"]";
   const PRICE_FIELD_ID = "preis";
   const INSTALL_RETRY_MS = 100;
@@ -148,13 +148,13 @@
     return staged;
   }
 
-  function validateApplyRequest(request, context = root) {
+  function validateFillRequest(request, context = root) {
     if (!state.started) return { ok: false, code: "FEATURE_DISABLED", error: "Guild-market pricing is disabled." };
     if (!request || typeof request !== "object") {
       return { ok: false, code: "INVALID_REQUEST", error: "The price-fill request is invalid." };
     }
     if (!state.staged || request.stageId !== state.staged.stageId) {
-      return { ok: false, code: "STALE_ITEM", error: "The staged market item changed. Stage it again before applying a price." };
+      return { ok: false, code: "STALE_ITEM", error: "The staged market item changed. Stage it again before filling a price." };
     }
 
     const quantity = positiveSafeInteger(request.quantity);
@@ -171,20 +171,20 @@
     const normalizedExpectedName = String(request.itemName || "").trim().replace(/\s+/g, " ").toLocaleLowerCase();
     const normalizedStagedName = String(state.staged.itemName || "").trim().replace(/\s+/g, " ").toLocaleLowerCase();
     if (!normalizedExpectedName || normalizedExpectedName !== normalizedStagedName || quantity !== state.staged.quantity) {
-      return { ok: false, code: "STALE_ITEM", error: "The staged market item no longer matches this suggestion." };
+      return { ok: false, code: "STALE_ITEM", error: "The staged market item no longer matches this automatic price." };
     }
 
     const currentSellId = readSellId(context);
     if (currentSellId !== state.staged.sellId) {
-      return { ok: false, code: "STALE_ITEM", error: "The staged market item changed. Stage it again before applying a price." };
+      return { ok: false, code: "STALE_ITEM", error: "The staged market item changed. Stage it again before filling a price." };
     }
     const field = (context.document || root.document)?.getElementById?.(PRICE_FIELD_ID);
     if (!field) return { ok: false, code: "PRICE_FIELD_MISSING", error: "The guild-market price field was not found." };
     return { ok: true, field, price };
   }
 
-  function applySuggestedPrice(request, context = root) {
-    const validation = validateApplyRequest(request, context);
+  function fillPriceField(request, context = root) {
+    const validation = validateFillRequest(request, context);
     if (!validation.ok) return validation;
     validation.field.value = String(validation.price);
     if (typeof context.calcDues === "function") context.calcDues();
@@ -276,8 +276,8 @@
     positiveSafeInteger,
     captureStagedItem,
     emitStagedItem,
-    validateApplyRequest,
-    applySuggestedPrice,
+    validateFillRequest,
+    fillPriceField,
     install,
     start,
     update,

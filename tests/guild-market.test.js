@@ -259,7 +259,7 @@ function makeContext(document, extra = {}) {
 
   loadScript("guild-market-core.js", context);
   const core = context.GladiatusGuildMarket;
-  assert.equal(core.version, "guild-market-core-v4");
+  assert.equal(core.version, "guild-market-core-v5");
   assert.equal(context.marketDrop, originalMarketDrop, "loading the MAIN core must be inert");
   assert.equal(doc.listenerCount("glad-helper:guild-market:control"), 0, "disabled MAIN core installs no control listener");
   assert.equal(windowListenerCount("message"), 0, "disabled MAIN core installs no window listener");
@@ -299,18 +299,18 @@ function makeContext(document, extra = {}) {
     unitPrice: 100000,
     price: 2000000
   };
-  assert.equal(core.applySuggestedPrice({ ...request, price: 1 }).code, "INVALID_PRICE");
+  assert.equal(core.fillPriceField({ ...request, price: 1 }).code, "INVALID_PRICE");
   assert.equal(doc.price.value, "6466");
-  assert.equal(core.applySuggestedPrice(request).ok, true);
+  assert.equal(core.fillPriceField(request).ok, true);
   assert.equal(doc.price.value, "2000000");
   assert.equal(calcDuesCalls, 1);
 
   doc.sellId.value = "ITEM-2";
-  assert.equal(core.applySuggestedPrice(request).code, "STALE_ITEM");
+  assert.equal(core.fillPriceField(request).code, "STALE_ITEM");
   core.stop();
   assert.equal(context.marketDrop, originalMarketDrop);
   assert.equal(core.getStatus().started, false);
-  assert.equal(core.applySuggestedPrice(request).code, "FEATURE_DISABLED");
+  assert.equal(core.fillPriceField(request).code, "FEATURE_DISABLED");
   assert.equal(core.stop(), true, "stop must be idempotent");
 
   core.start({ enabled: true });
@@ -356,8 +356,8 @@ async function testIntegratedController() {
               callback({ ok: true, result });
               return;
             }
-            if (message.type === "GLAD_GUILD_MARKET_APPLY") {
-              callback({ ok: true, result: main.GladiatusGuildMarket.applySuggestedPrice(message.request) });
+            if (message.type === "GLAD_GUILD_MARKET_FILL") {
+              callback({ ok: true, result: main.GladiatusGuildMarket.fillPriceField(message.request) });
               return;
             }
             callback({ ok: false, error: "Unknown message" });
@@ -386,7 +386,7 @@ async function testIntegratedController() {
 
   const settings = {
     enabled: true,
-    mode: "suggest",
+    mode: "automatic",
     rules: [{ id: "mini", itemName: "Mini-Pumpkin", pricePerUnit: 100000, enabled: true }]
   };
   assert.equal(await controller.start(settings), true);
@@ -399,22 +399,23 @@ async function testIntegratedController() {
   miniPumpkin.dataset.tooltip = '[["Mini-Pumpkin"]]';
   miniPumpkin.sellId = "ITEM-1";
   main.marketDrop(miniPumpkin, 20);
-  assert.equal(doc.price.value, "7000", "suggest mode must not fill before Apply");
+  assert.equal(doc.price.value, "7000", "the game stages its native price before the isolated bridge responds");
+  await settle();
+  assert.equal(doc.price.value, "2000000", "a matching rule must fill automatically");
+  assert.equal(calcDuesCalls, 1);
   const panel = doc.getElementById("glad-guild-market-suggestion");
   assert.ok(panel);
-  const apply = panel.querySelector(".glad-guild-market-apply");
-  assert.ok(apply);
-  apply.click();
+  assert.equal(panel.querySelector(".glad-guild-market-apply"), null, "automatic pricing has no approval button");
+  assert.match(doc.getElementById("glad-guild-market-status").textContent, /automatically/);
+
+  doc.price.value = "12345";
   await settle();
-  assert.equal(doc.price.value, "2000000");
-  assert.equal(calcDuesCalls, 1);
-  assert.match(doc.getElementById("glad-guild-market-status").textContent, /Review the listing/);
+  assert.equal(doc.price.value, "12345", "manual edits are not reasserted");
 
   main.marketDrop(miniPumpkin, 2);
   doc.sellId.value = "DIFFERENT-ITEM";
-  doc.getElementById("glad-guild-market-suggestion").querySelector(".glad-guild-market-apply").click();
   await settle();
-  assert.equal(doc.price.value, "7000", "a stale suggestion must not overwrite the field");
+  assert.equal(doc.price.value, "7000", "a stale automatic calculation must not overwrite the field");
   assert.match(doc.getElementById("glad-guild-market-status").textContent, /changed/);
 
   await controller.stop();

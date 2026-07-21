@@ -8,7 +8,8 @@ This repo contains source and deterministic build targets for a local Chrome MV3
 - If DevTools MCP reports a closed selected page, ask for an MCP/app reset instead of guessing from stale state.
 - Before a full app reset, try MCP-level recovery (`list_pages`, `select_page`, `new_page`, `navigate_page`). If every call fails with the closed-page error, inspect local processes and restart only the Chrome child owned by `chrome-devtools-mcp` rather than the user's normal Chrome. It uses a separate profile under `~/.cache/chrome-devtools-mcp/chrome-profile` and can get stuck on a closed target after tabs are closed.
 - Prefer inspecting the real DOM and network behavior before changing scraper logic. The game is stateful and the auction markup can differ between Gladiator and Mercenary necessities.
-- Do not automate bids, purchases, login, CAPTCHA, or account-changing actions.
+- Do not use live-browser tooling to trigger bids, purchases, login, CAPTCHA, fights, or other account-changing actions during inspection.
+- The private full build may implement an explicitly user-clicked Arena/Circus fight shortcut. Keep that code isolated to `src/features/arena/` and ensure it is never packaged in the guild-market target.
 
 ## Website Facts
 
@@ -29,7 +30,7 @@ This repo contains source and deterministic build targets for a local Chrome MV3
 
 - `src/features/auction/` owns auction contracts, parsing/scanning, scoring, content UI, and its background scan handler.
 - `src/features/arena/` owns arena parsing, simulation, scans, annotations, passive/status controllers, and its background scan handler.
-- `src/features/guild-market/` owns the inert MAIN-world bridge and isolated suggestion/Apply controller.
+- `src/features/guild-market/` owns the inert MAIN-world bridge and isolated automatic price-fill controller.
 - `src/shared/` owns settings, security, tooltip parsing, score primitives, feature-scoped page styles, and the diagnostics layer under `src/shared/logging/`.
 - `src/runtime/` owns the full build's background worker and feature lifecycle coordinator.
 - `src/popup/` owns the full build's popup shell, state, and feature views.

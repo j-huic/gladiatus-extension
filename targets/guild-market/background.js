@@ -1,5 +1,5 @@
 // Narrow service worker for the standalone Guild Market helper. It has no
-// network-request path and only relays lifecycle and explicit price-fill requests to the
+// network-request path and only relays lifecycle and automatic price-fill requests to the
 // already-loaded MAIN-world bridge on the matching tab.
 importScripts("settings.js");
 
@@ -19,7 +19,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
 function isKnownMessage(message) {
   return message?.type === "GLAD_GUILD_MARKET_CONTROL"
-    || message?.type === "GLAD_GUILD_MARKET_APPLY";
+    || message?.type === "GLAD_GUILD_MARKET_FILL";
 }
 
 async function getSettings() {
@@ -29,7 +29,7 @@ async function getSettings() {
 async function requireEnabled() {
   const settings = await getSettings();
   if (settings.enabled === true) return settings;
-  const error = new Error("Guild Market price suggestions are disabled.");
+  const error = new Error("Guild Market automatic pricing is disabled.");
   error.code = "FEATURE_DISABLED";
   throw error;
 }
@@ -54,7 +54,7 @@ function validateGuildMarketSender(sender) {
   return sender.tab.id;
 }
 
-function normalizeApplyRequest(value) {
+function normalizeFillRequest(value) {
   const raw = value && typeof value === "object" ? value : {};
   return {
     requestId: String(raw.requestId || "").slice(0, 100),
@@ -75,8 +75,8 @@ function normalizedItemName(value) {
   return String(value || "").trim().replace(/\s+/g, " ").toLocaleLowerCase("en-US");
 }
 
-function validateApplyRequest(value, settings) {
-  const request = normalizeApplyRequest(value);
+function validateFillRequest(value, settings) {
+  const request = normalizeFillRequest(value);
   if (!request.requestId || !request.stageId) {
     const error = new Error("The price-fill request is missing its staged-item identity.");
     error.code = "INVALID_REQUEST";
@@ -84,7 +84,7 @@ function validateApplyRequest(value, settings) {
   }
   if (request.ruleId !== "mini-pumpkin"
     || normalizedItemName(request.itemName) !== normalizedItemName(SETTINGS.itemName)) {
-    const error = new Error("This release only suggests prices for Mini-Pumpkin.");
+    const error = new Error("This release only fills prices for Mini-Pumpkin.");
     error.code = "INVALID_ITEM";
     throw error;
   }
@@ -101,7 +101,7 @@ function validateApplyRequest(value, settings) {
     || unitPrice !== expectedUnitPrice
     || !Number.isSafeInteger(expectedTotal)
     || expectedTotal !== price) {
-    const error = new Error("The Mini-Pumpkin suggestion no longer matches the saved unit price.");
+    const error = new Error("The Mini-Pumpkin price no longer matches the saved unit price.");
     error.code = "INVALID_PRICE";
     throw error;
   }
@@ -139,14 +139,14 @@ async function handleMessage(message, sender) {
     return { ok: true, result };
   }
 
-  if (message.type !== "GLAD_GUILD_MARKET_APPLY") {
+  if (message.type !== "GLAD_GUILD_MARKET_FILL") {
     const error = new Error("Unknown extension message.");
     error.code = "UNKNOWN_MESSAGE";
     throw error;
   }
   const settings = await requireEnabled();
-  const request = validateApplyRequest(message.request, settings);
-  const result = await runInMain(tabId, "applySuggestedPrice", [request]);
+  const request = validateFillRequest(message.request, settings);
+  const result = await runInMain(tabId, "fillPriceField", [request]);
   await stopAndRethrowDisabled(tabId, request.unitPrice);
   return { ok: true, result };
 }
@@ -192,6 +192,6 @@ self.GladiatusGuildMarketBackground = Object.freeze({
   handleMessage,
   isKnownMessage,
   validateGuildMarketSender,
-  normalizeApplyRequest,
-  validateApplyRequest
+  normalizeFillRequest,
+  validateFillRequest
 });

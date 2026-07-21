@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Gladiatus Helper (Unofficial)",
-  "description": "Optional auction, arena insight, and guild-market pricing helpers for Gladiatus.",
-  "version": "0.2.0",
+  "description": "Optional auction, arena insight and quick-fight, and guild-market pricing helpers for Gladiatus.",
+  "version": "0.2.1",
   "permissions": ["activeTab", "storage", "scripting"],
   "host_permissions": ["https://*.gladiatus.gameforge.com/*"],
   "action": {
@@ -21,7 +21,7 @@
     },
     {
       "matches": ["https://*.gladiatus.gameforge.com/game/*"],
-      "js": ["src/shared/helper-security.js", "src/shared/helper-settings.js", "src/shared/logging/log-core.js", "src/shared/logging/log-setup.js", "src/features/auction/auction-schema.js", "src/shared/tooltip-parser.js", "src/shared/score-model.js", "src/features/auction/auction-model.js", "src/features/auction/auction-core.js", "src/features/arena/arena-core.js", "src/features/arena/arena-sim.js", "src/features/arena/arena-scan.js", "src/features/arena/arena-passive-content.js", "src/features/arena/arena-status-content.js", "src/features/guild-market/guild-market-content.js", "src/features/auction/auction-content.js", "src/features/arena/arena-content.js", "src/runtime/feature-runtime.js"],
+      "js": ["src/shared/helper-security.js", "src/shared/helper-settings.js", "src/shared/logging/log-core.js", "src/shared/logging/log-setup.js", "src/features/auction/auction-schema.js", "src/shared/tooltip-parser.js", "src/shared/score-model.js", "src/features/auction/auction-model.js", "src/features/auction/auction-core.js", "src/features/arena/arena-core.js", "src/features/arena/arena-sim.js", "src/features/arena/arena-scan.js", "src/features/arena/arena-passive-content.js", "src/features/arena/arena-fight.js", "src/features/arena/arena-header-button.js", "src/features/arena/arena-status-content.js", "src/features/guild-market/guild-market-content.js", "src/features/auction/auction-content.js", "src/features/arena/arena-content.js", "src/runtime/feature-runtime.js"],
       "css": ["src/shared/styles.css"],
       "run_at": "document_idle"
     }

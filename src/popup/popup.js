@@ -338,7 +338,7 @@ function renderGuildMarketWorkspace() {
   description.textContent = "Stage an item on the Guild Market page. A matching enabled rule shows its stack calculation beside the price field.";
   const notice = document.createElement("p");
   notice.className = "notice";
-  notice.textContent = "Apply fills only the price field and recalculates fees. The extension never submits the listing.";
+  notice.textContent = "Matching prices fill automatically and fees are recalculated. The extension never submits the listing.";
   page.append(title, description, notice);
 
   const rules = state.helperSettings.features.guildMarket.rules.filter((rule) => rule.enabled !== false);
@@ -362,7 +362,7 @@ function renderGuildMarketWorkspace() {
   }
   page.append(list);
   nodes.results.replaceChildren(page);
-  setStatus("Guild Market suggestions are ready on the current page.");
+  setStatus("Automatic Guild Market pricing is ready on the current page.");
 }
 
 function navigate(shellPage) {
@@ -594,10 +594,10 @@ function fallbackSettings() {
     onboarding: { completed: false, version: 1 },
     features: {
       auction: { enabled: false, pageSorter: true, fullScan: true, scoreBadges: true, applyRankingToPage: false },
-      arena: { enabled: false, annotations: true, manualScan: true, simulations: true, passiveRefresh: false, statusWidget: true },
+      arena: { enabled: false, annotations: true, manualScan: true, simulations: true, passiveRefresh: false, statusWidget: true, quickFight: true },
       guildMarket: {
         enabled: false,
-        mode: "suggest",
+        mode: "automatic",
         rules: [{ id: "mini-pumpkin", itemName: "Mini-Pumpkin", pricePerUnit: 100000, enabled: true }]
       }
     },

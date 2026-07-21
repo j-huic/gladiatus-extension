@@ -16,19 +16,20 @@ const FEATURE_DEFINITIONS = [
   {
     id: "arena",
     title: "Arena insights",
-    description: "Inspect opponent profiles, compare strength, and estimate matchups without starting fights.",
+    description: "Inspect opponents, estimate matchups, and optionally fight the best cached target from the header.",
     capabilities: [
       ["annotations", "Opponent annotations", "Show read-only profile insights beside arena rows."],
       ["manualScan", "Manual opponent scan", "Scan visible opponents when you request it."],
       ["simulations", "Matchup simulations", "Estimate win likelihood from cached combat stats."],
       ["passiveRefresh", "Passive refresh", "Refresh eligible opponent information in the background."],
-      ["statusWidget", "Page status widget", "Show scan freshness on Gladiatus pages."]
+      ["statusWidget", "Page status widget", "Show scan freshness on Gladiatus pages."],
+      ["quickFight", "Quick-fight header buttons", "Add ⚔ shortcuts beside Arena and Circus that immediately fight the best cached opponent when clicked."]
     ]
   },
   {
     id: "guildMarket",
     title: "Guild Market pricing",
-    description: "Suggest stack prices from your rules and fill the field only when you explicitly apply one.",
+    description: "Automatically fill stack prices from matching rules while leaving submission to you.",
     capabilities: []
   }
 ];
@@ -41,7 +42,7 @@ export function createSettingsView({ render, navigate, clearFeatureCache, clearA
     intro.append(
       heading("Choose your Gladiatus tools"),
       paragraph("Each feature is independent. Start with only the helpers you want; you can change these choices in Settings at any time.", "shell-intro"),
-      notice("The extension reads relevant Gladiatus pages using your existing signed-in session. Data and preferences remain in this browser. It never bids, buys, lists an item, or starts a fight.")
+      notice("The extension reads relevant Gladiatus pages using your existing signed-in session. Data and preferences remain in this browser. It never bids, buys, or lists an item. If enabled, a Quick-fight button starts a fight only when you explicitly click it.")
     );
     page.append(intro, renderFeatureGrid({ onboarding: true }));
 
@@ -84,7 +85,7 @@ export function createSettingsView({ render, navigate, clearFeatureCache, clearA
     );
     data.append(
       cacheActions,
-      paragraph("Guild Market suggestions are page-local and disappear when the staged item changes, the feature is disabled, or the page closes.", "setting-help")
+      paragraph("Guild Market calculations are page-local and disappear when the staged item changes, the feature is disabled, or the page closes.", "setting-help")
     );
 
     const diagnostics = document.createElement("section");
@@ -205,9 +206,9 @@ export function createSettingsView({ render, navigate, clearFeatureCache, clearA
     const modeCopy = document.createElement("span");
     modeCopy.textContent = "Pricing behavior";
     const mode = document.createElement("strong");
-    mode.textContent = "Suggest, then Apply";
+    mode.textContent = "Fill automatically";
     modeRow.append(modeCopy, mode);
-    container.append(modeRow, paragraph("A matching rule shows the stack calculation. Apply fills only the price field; it never submits the listing.", "setting-help"));
+    container.append(modeRow, paragraph("A matching rule immediately fills only the price field and recalculates fees; it never submits the listing.", "setting-help"));
 
     const rules = document.createElement("div");
     rules.className = "rule-list";

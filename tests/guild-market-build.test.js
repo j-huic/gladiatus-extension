@@ -175,7 +175,7 @@ async function testSettings(settingsFile) {
     assert.deepEqual(storage.getCalls, [settings.storageKey], "normal reads must not touch the full-build settings record");
     assert.deepEqual(clone(settings.toFeatureSettings({ enabled: true, pricePerUnit: 123456 })), {
       enabled: true,
-      mode: "suggest",
+      mode: "automatic",
       rules: [{
         id: "mini-pumpkin",
         itemName: "Mini-Pumpkin",
@@ -291,7 +291,7 @@ async function testBackground(packageDir) {
   assert.deepEqual(clone(env.executeCalls.at(-1).args[1]), [{ enabled: true }]);
 
   await background.handleMessage({
-    type: "GLAD_GUILD_MARKET_APPLY",
+    type: "GLAD_GUILD_MARKET_FILL",
     request: {
       requestId: "request-1",
       stageId: "stage-1",
@@ -303,9 +303,9 @@ async function testBackground(packageDir) {
       unrelatedSecret: "must-not-cross-world"
     }
   }, guildSender());
-  const applyCall = env.executeCalls.at(-1);
-  assert.equal(applyCall.args[0], "applySuggestedPrice");
-  assert.deepEqual(clone(applyCall.args[1]), [{
+  const fillCall = env.executeCalls.at(-1);
+  assert.equal(fillCall.args[0], "fillPriceField");
+  assert.deepEqual(clone(fillCall.args[1]), [{
     requestId: "request-1",
     stageId: "stage-1",
     itemName: "Mini-Pumpkin",
@@ -333,7 +333,7 @@ async function testBackground(packageDir) {
     const callsBefore = env.executeCalls.length;
     await assert.rejects(
       background.handleMessage({
-        type: "GLAD_GUILD_MARKET_APPLY",
+        type: "GLAD_GUILD_MARKET_FILL",
         request: { ...baseline, ...requestPatch }
       }, guildSender()),
       (error) => error.code === code
@@ -343,7 +343,7 @@ async function testBackground(packageDir) {
 
   env.storage.state[settings.storageKey] = { version: 1, enabled: false, pricePerUnit: 100000 };
   await assert.rejects(
-    background.handleMessage({ type: "GLAD_GUILD_MARKET_APPLY", request: {} }, guildSender()),
+    background.handleMessage({ type: "GLAD_GUILD_MARKET_FILL", request: {} }, guildSender()),
     (error) => error.code === "FEATURE_DISABLED",
     "each mutating request must re-read the persisted switch instead of trusting a stale worker cache"
   );
@@ -352,14 +352,14 @@ async function testBackground(packageDir) {
     "glad-guild-market-settings-v1": { version: 1, enabled: true, pricePerUnit: 100000 }
   }, {
     onExecute(details, storage) {
-      if (details.args[0] === "applySuggestedPrice") {
+      if (details.args[0] === "fillPriceField") {
         storage.state["glad-guild-market-settings-v1"].enabled = false;
       }
     }
   });
   await assert.rejects(
     lateDisable.context.GladiatusGuildMarketBackground.handleMessage({
-      type: "GLAD_GUILD_MARKET_APPLY",
+      type: "GLAD_GUILD_MARKET_FILL",
       request: {
         requestId: "request-late-disable",
         stageId: "stage-1",
@@ -372,20 +372,20 @@ async function testBackground(packageDir) {
     }, guildSender()),
     (error) => error.code === "FEATURE_DISABLED"
   );
-  assert.deepEqual(lateDisable.executeCalls.map((call) => call.args[0]), ["applySuggestedPrice", "stop"]);
+  assert.deepEqual(lateDisable.executeCalls.map((call) => call.args[0]), ["fillPriceField", "stop"]);
 
   const latePriceChange = makeBackgroundContext(packageDir, {
     "glad-guild-market-settings-v1": { version: 1, enabled: true, pricePerUnit: 100000 }
   }, {
     onExecute(details, storage) {
-      if (details.args[0] === "applySuggestedPrice") {
+      if (details.args[0] === "fillPriceField") {
         storage.state["glad-guild-market-settings-v1"].pricePerUnit = 125000;
       }
     }
   });
   await assert.rejects(
     latePriceChange.context.GladiatusGuildMarketBackground.handleMessage({
-      type: "GLAD_GUILD_MARKET_APPLY",
+      type: "GLAD_GUILD_MARKET_FILL",
       request: {
         requestId: "request-late-price",
         stageId: "stage-1",
@@ -400,8 +400,8 @@ async function testBackground(packageDir) {
   );
   assert.deepEqual(
     latePriceChange.executeCalls.map((call) => call.args[0]),
-    ["applySuggestedPrice"],
-    "a unit-price change must reject the stale Apply without stopping an otherwise enabled bridge"
+    ["fillPriceField"],
+    "a unit-price change must reject a stale fill without stopping an otherwise enabled bridge"
   );
 
   const bridgeFailure = makeBackgroundContext(packageDir, {
@@ -454,7 +454,7 @@ async function testRuntime(runtimeFile) {
         async get() { return { enabled: false, pricePerUnit: 100000 }; },
         subscribe(next) { listener = next; return () => { listener = null; }; },
         toFeatureSettings(value) {
-          return { enabled: value.enabled === true, mode: "suggest", rules: [{ pricePerUnit: value.pricePerUnit }] };
+          return { enabled: value.enabled === true, mode: "automatic", rules: [{ pricePerUnit: value.pricePerUnit }] };
         }
       },
       GladiatusGuildMarketController: {
@@ -653,6 +653,7 @@ async function main() {
       .filter((file) => /\.(?:js|json|html|css)$/.test(file))
       .map((file) => fs.readFileSync(path.join(packageA, file), "utf8"))
       .join("\n");
+    assert.doesNotMatch(packageText, /Apply suggested price|glad-guild-market-apply|GLAD_GUILD_MARKET_APPLY/);
     for (const [label, pattern] of [
       ["unrelated feature name", /\b(?:auction|arena)\b/i],
       ["unrelated message route", /GLAD_(?:AUCTION|ARENA|FEATURE_REPAIR)/],

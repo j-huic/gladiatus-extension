@@ -3,12 +3,12 @@
 A local Chrome MV3 extension with three independently optional Gladiatus helpers:
 
 - auction page sorting, ranking rules, and multi-category scans;
-- read-only arena opponent insights, profile scans, and simulations;
-- guild-market price suggestions with an explicit **Apply suggested price** action.
+- arena opponent insights, profile scans, simulations, and optional user-clicked quick-fight shortcuts;
+- automatic guild-market price filling for matching rules, without submitting listings.
 
 It reads the visible auction item tooltip data from `data-tooltip`, parses stat lines such as `Strength +11% (+5)` or `Damage 50 - 62`, and reorders the current auction page in the browser. It works across auction item types because the parser reads the item tooltip data for each visible listing instead of assuming weapons, shields, helmets, or any other category.
 
-The extension does not bid, buy, fight, submit market listings, or contact developer-owned or unrelated third-party services. Enabled scanners do request Gladiatus Gameforge pages with the active browser session. Settings, rules, and scan caches remain in local extension storage. Stored and exported records remove known session and CSRF parameters.
+The extension does not bid, buy, submit market listings, or contact developer-owned or unrelated third-party services. Enabled scanners request Gladiatus Gameforge pages with the active browser session. In the private full build, the optional Arena/Circus ⚔ shortcut sends a fight request only after the user explicitly clicks it. The guild-market release contains no fight code. Settings, rules, and scan caches remain in local extension storage. Stored and exported records remove known session and CSRF parameters.
 
 On a fresh installation all three features are off until they are selected in onboarding. They can be enabled, configured, or disabled independently from the popup. Disabling a feature keeps its settings and cached data until the user clears them.
 
@@ -45,7 +45,7 @@ dist/                generated Chrome-loadable artifacts
 
 ## Guild-Market-Only Release
 
-The public release can be built as a physically separate, single-purpose extension. This artifact contains only the Mini-Pumpkin Guild Market suggestion/Apply flow; it does not package the auction, arena, scanner, simulation, diagnostics, or generic popup modules.
+The public release can be built as a physically separate, single-purpose extension. This artifact contains only automatic Mini-Pumpkin Guild Market pricing; it does not package the auction, arena, scanner, simulation, diagnostics, or generic popup modules.
 
 ```sh
 npm run build:guild-market

@@ -20,6 +20,8 @@ const relativeByBasename = Object.freeze({
   "arena-sim.js": "src/features/arena/arena-sim.js",
   "arena-scan.js": "src/features/arena/arena-scan.js",
   "arena-passive-content.js": "src/features/arena/arena-passive-content.js",
+  "arena-fight.js": "src/features/arena/arena-fight.js",
+  "arena-header-button.js": "src/features/arena/arena-header-button.js",
   "arena-status-content.js": "src/features/arena/arena-status-content.js",
   "arena-content.js": "src/features/arena/arena-content.js",
   "arena-background-scan.js": "src/features/arena/arena-background-scan.js",

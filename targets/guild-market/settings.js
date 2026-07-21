@@ -136,7 +136,7 @@
     const settings = normalize(value);
     return {
       enabled: settings.enabled,
-      mode: "suggest",
+      mode: "automatic",
       rules: [{
         id: "mini-pumpkin",
         itemName: ITEM_NAME,

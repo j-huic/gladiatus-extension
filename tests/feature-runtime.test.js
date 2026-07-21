@@ -65,6 +65,7 @@ async function run() {
   const arena = controller();
   const passive = controller();
   const status = controller();
+  const quickFight = controller();
   const guild = controller();
   const context = {
     console,
@@ -76,6 +77,7 @@ async function run() {
     GladiatusArenaFeature: arena,
     GladiatusArenaPassiveFeature: passive,
     GladiatusArenaStatusFeature: status,
+    GladiatusArenaHeaderButtonFeature: quickFight,
     GladiatusGuildMarketController: guild
   };
   context.window = context;
@@ -100,6 +102,7 @@ async function run() {
     await settle(context.GladiatusFeatureRuntime);
     assert.equal(auction.active, next.features.auction.enabled, `auction state for mask ${mask}`);
     assert.equal(arena.active, next.features.arena.enabled, `arena state for mask ${mask}`);
+    assert.equal(quickFight.active, next.features.arena.enabled, `arena quick-fight state for mask ${mask}`);
     assert.equal(guild.active, next.features.guildMarket.enabled, `guild state for mask ${mask}`);
   }
 
@@ -112,6 +115,7 @@ async function run() {
   assert.equal(arena.active, false);
   assert.equal(passive.active, false);
   assert.equal(status.active, false);
+  assert.equal(quickFight.active, false);
   assert.equal(guild.active, false);
   console.log("feature runtime tests passed");
 }

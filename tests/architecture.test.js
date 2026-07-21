@@ -573,6 +573,8 @@ const { schema, score, model, core, arena, sim } = loadGlobals();
     "src/features/arena/arena-sim.js",
     "src/features/arena/arena-scan.js",
     "src/features/arena/arena-passive-content.js",
+    "src/features/arena/arena-fight.js",
+    "src/features/arena/arena-header-button.js",
     "src/features/arena/arena-status-content.js",
     "src/features/arena/arena-content.js",
     "src/runtime/feature-runtime.js"
@@ -610,6 +612,8 @@ const { schema, score, model, core, arena, sim } = loadGlobals();
     "src/features/arena/arena-sim.js",
     "src/features/arena/arena-scan.js",
     "src/features/arena/arena-passive-content.js",
+    "src/features/arena/arena-fight.js",
+    "src/features/arena/arena-header-button.js",
     "src/features/arena/arena-status-content.js",
     "src/features/guild-market/guild-market-content.js",
     "src/features/auction/auction-content.js",
@@ -620,6 +624,9 @@ const { schema, score, model, core, arena, sim } = loadGlobals();
   assert.ok(isolatedEntries[0].js.indexOf("src/shared/tooltip-parser.js") < isolatedEntries[0].js.indexOf("src/features/auction/auction-core.js"));
   assert.ok(isolatedEntries[0].js.indexOf("src/features/arena/arena-sim.js") < isolatedEntries[0].js.indexOf("src/features/arena/arena-scan.js"));
   assert.ok(isolatedEntries[0].js.indexOf("src/features/arena/arena-scan.js") < isolatedEntries[0].js.indexOf("src/features/arena/arena-passive-content.js"));
+  assert.ok(isolatedEntries[0].js.indexOf("src/features/arena/arena-passive-content.js") < isolatedEntries[0].js.indexOf("src/features/arena/arena-fight.js"));
+  assert.ok(isolatedEntries[0].js.indexOf("src/features/arena/arena-fight.js") < isolatedEntries[0].js.indexOf("src/features/arena/arena-header-button.js"));
+  assert.ok(isolatedEntries[0].js.indexOf("src/features/arena/arena-header-button.js") < isolatedEntries[0].js.indexOf("src/features/arena/arena-status-content.js"));
   assert.ok(isolatedEntries[0].js.indexOf("src/features/arena/arena-passive-content.js") < isolatedEntries[0].js.indexOf("src/features/arena/arena-status-content.js"));
   assert.ok(isolatedEntries[0].js.indexOf("src/features/arena/arena-status-content.js") < isolatedEntries[0].js.indexOf("src/features/arena/arena-content.js"));
   assert.match(arenaScanSource, /GLAD_ARENA_REFRESH_SELF_PROFILE/);
@@ -670,11 +677,14 @@ const { schema, score, model, core, arena, sim } = loadGlobals();
   assert.match(popupRuntimeSource, /ensureFeatureContentScript\(tab\.id, "auction"\)/);
   assert.match(popupRuntimeSource, /ensureFeatureContentScript\(tab\.id, "arena"\)/);
   assert.ok(popupRuntimeSource.indexOf("src/features/arena/arena-scan.js") < popupRuntimeSource.indexOf("src/features/arena/arena-passive-content.js"));
+  assert.ok(popupRuntimeSource.indexOf("src/features/arena/arena-passive-content.js") < popupRuntimeSource.indexOf("src/features/arena/arena-fight.js"));
+  assert.ok(popupRuntimeSource.indexOf("src/features/arena/arena-fight.js") < popupRuntimeSource.indexOf("src/features/arena/arena-header-button.js"));
+  assert.ok(popupRuntimeSource.indexOf("src/features/arena/arena-header-button.js") < popupRuntimeSource.indexOf("src/features/arena/arena-status-content.js"));
   assert.ok(popupRuntimeSource.indexOf("src/features/arena/arena-passive-content.js") < popupRuntimeSource.indexOf("src/features/arena/arena-status-content.js"));
   assert.ok(popupRuntimeSource.indexOf("src/features/arena/arena-status-content.js") < popupRuntimeSource.indexOf("src/features/arena/arena-content.js"));
   assert.equal(fs.existsSync(repoFile("src/features/auction/content.js")), false);
-  assert.equal(fs.existsSync(repoFile("src/features/arena/arena-fight.js")), false);
-  assert.equal(fs.existsSync(repoFile("src/features/arena/arena-header-button.js")), false);
+  assert.equal(fs.existsSync(repoFile("src/features/arena/arena-fight.js")), true);
+  assert.equal(fs.existsSync(repoFile("src/features/arena/arena-header-button.js")), true);
 
   const auctionContentSource = fs.readFileSync(repoFile("auction-content.js"), "utf8");
   const guildContentSource = fs.readFileSync(repoFile("guild-market-content.js"), "utf8");
@@ -682,6 +692,7 @@ const { schema, score, model, core, arena, sim } = loadGlobals();
   for (const [source, controllerName] of [
     [auctionContentSource, "GladiatusAuctionFeature"],
     [arenaContentSource, "GladiatusArenaFeature"],
+    [fs.readFileSync(repoFile("arena-header-button.js"), "utf8"), "GladiatusArenaHeaderButtonFeature"],
     [guildContentSource, "GladiatusGuildMarketController"]
   ]) {
     assert.match(source, new RegExp(controllerName));
@@ -703,6 +714,8 @@ const { schema, score, model, core, arena, sim } = loadGlobals();
     "src/features/arena/arena-background-scan.js",
     "src/features/arena/arena-sim.js",
     "src/features/arena/arena-passive-content.js",
+    "src/features/arena/arena-fight.js",
+    "src/features/arena/arena-header-button.js",
     "src/features/arena/arena-status-content.js",
     "src/features/guild-market/guild-market-content.js",
     "src/shared/helper-security.js",
@@ -738,11 +751,17 @@ const { schema, score, model, core, arena, sim } = loadGlobals();
 
   const packagedFiles = recursiveFiles(repoFile("src"))
     .filter((file) => file.endsWith(".js"));
-  const packagedSources = packagedFiles
+  const packagedSourcesWithoutPrivateFight = packagedFiles
+    .filter((file) => !file.endsWith("arena-fight.js") && !file.endsWith("arena-header-button.js"))
     .map((file) => fs.readFileSync(file, "utf8"))
     .join("\n");
-  assert.doesNotMatch(packagedSources, /submod=doCombat|doGroupFight\.php|doArenaFight\.php|GladiatusArenaFight/);
-  assert.doesNotMatch(packagedSources, /submod=(?:bid|buy|purchase|sell)|do(?:Bid|Buy|Purchase|Sell)\.php/i);
+  assert.doesNotMatch(packagedSourcesWithoutPrivateFight, /submod=doCombat|doGroupFight\.php|doArenaFight\.php|GladiatusArenaFight/);
+  assert.doesNotMatch(packagedSourcesWithoutPrivateFight, /submod=(?:bid|buy|purchase|sell)|do(?:Bid|Buy|Purchase|Sell)\.php/i);
+  const privateFightSource = fs.readFileSync(repoFile("arena-fight.js"), "utf8");
+  assert.match(privateFightSource, /submod=doCombat/);
+  assert.match(privateFightSource, /doGroupFight\.php/);
+  assert.match(privateFightSource, /doArenaFight\.php/);
+  assert.match(privateFightSource, /X-CSRF-Token/);
   const guildMarketSources = ["guild-market-core.js", "guild-market-content.js"]
     .map((file) => fs.readFileSync(repoFile(file), "utf8"))
     .join("\n");

@@ -96,11 +96,12 @@
           manualScan: true,
           simulations: true,
           passiveRefresh: false,
-          statusWidget: true
+          statusWidget: true,
+          quickFight: true
         },
         guildMarket: {
           enabled: false,
-          mode: "suggest",
+          mode: "automatic",
           rules: [clone(DEFAULT_GUILD_RULE)]
         }
       },
@@ -215,11 +216,12 @@
           manualScan: normalizeBoolean(rawArena.manualScan, fallbackArena.manualScan),
           simulations: normalizeBoolean(rawArena.simulations, fallbackArena.simulations),
           passiveRefresh: normalizeBoolean(rawArena.passiveRefresh, fallbackArena.passiveRefresh),
-          statusWidget: normalizeBoolean(rawArena.statusWidget, fallbackArena.statusWidget)
+          statusWidget: normalizeBoolean(rawArena.statusWidget, fallbackArena.statusWidget),
+          quickFight: normalizeBoolean(rawArena.quickFight, fallbackArena.quickFight)
         },
         guildMarket: {
           enabled: normalizeBoolean(rawGuild.enabled, fallbackGuild.enabled),
-          mode: rawGuild.mode === "suggest" ? "suggest" : fallbackGuild.mode === "suggest" ? "suggest" : "suggest",
+          mode: "automatic",
           rules: normalizeRules(rawGuild.rules, fallbackGuild.rules)
         }
       },

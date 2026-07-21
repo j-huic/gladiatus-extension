@@ -29,7 +29,7 @@
       const next = await settingsApi.update({ enabled: !settings.enabled });
       render(next);
       setStatus(next.enabled
-        ? "Enabled. Stage a Mini-Pumpkin on the Guild Market page to see a suggestion."
+        ? "Enabled. Staged Mini-Pumpkins will be priced automatically."
         : "Disabled. The page helper has been removed.");
     } catch (error) {
       setStatus(error?.message || "The setting could not be saved.", true);

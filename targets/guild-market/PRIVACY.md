@@ -2,7 +2,7 @@
 
 Gladiatus Guild Market Helper (Unofficial) runs locally in Chrome. It does not send data to the extension developer, analytics providers, advertising services, or unrelated third parties.
 
-When enabled on a Gladiatus Guild Market page, the extension reads the item staged in the game's sell form so it can match Mini-Pumpkin and calculate a suggested stack price. Clicking **Apply suggested price** fills only the price field and asks the page to recalculate its displayed fee. The extension does not submit the form or list an item.
+When enabled on a Gladiatus Guild Market page, the extension reads the item staged in the game's sell form so it can match Mini-Pumpkin and calculate its stack price. A matching price is filled automatically and the displayed fee is recalculated. The extension does not submit the form or list an item.
 
 The extension does not fetch any pages. It uses the already-open `*.gladiatus.gameforge.com` Guild Market page and the browser's active Gameforge session only to provide its on-page interface.
 
