@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Gladiatus Guild Market Helper (Unofficial)",
-  "description": "Automatically fills Mini-Pumpkin stack prices on the Gladiatus Guild Market without listing items.",
-  "version": "1.0.1",
+  "description": "Automatically fills Mini-Pumpkin stack prices and selects a 24-hour duration without listing items.",
+  "version": "1.0.2",
   "permissions": ["storage", "scripting"],
   "host_permissions": ["https://*.gladiatus.gameforge.com/game/index.php*"],
   "icons": {

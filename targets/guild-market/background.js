@@ -82,11 +82,9 @@ function validateFillRequest(value, settings) {
     error.code = "INVALID_REQUEST";
     throw error;
   }
-  const itemRule = request.ruleId === "test-meat-haunch"
-    ? { itemName: "Meat Haunch" }
-    : request.ruleId === "mini-pumpkin"
-      ? { itemName: SETTINGS.itemName }
-      : null;
+  const itemRule = request.ruleId === "mini-pumpkin"
+    ? { itemName: SETTINGS.itemName }
+    : null;
   if (!itemRule
     || !normalizedItemName(request.itemName).includes(normalizedItemName(itemRule.itemName))) {
     const error = new Error("This release only fills prices for its supported Guild Market items.");

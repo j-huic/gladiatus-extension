@@ -5,7 +5,7 @@
 // page UI and never submits the form.
 (() => {
   const root = typeof globalThis !== "undefined" ? globalThis : window;
-  const CONTENT_VERSION = "guild-market-content-v5";
+  const CONTENT_VERSION = "guild-market-content-v7";
   const LEGACY_UI_IDS = Object.freeze([
     "glad-guild-market-suggestion",
     "glad-guild-market-style"
@@ -22,10 +22,6 @@
   const DEFAULT_RULES = Object.freeze([
     { id: "mini-pumpkin", itemName: "Mini-Pumpkin", pricePerUnit: 100000, enabled: true }
   ]);
-  const TEST_RULES = Object.freeze([
-    { id: "test-meat-haunch", itemName: "Meat Haunch", pricePerUnit: 100000, enabled: true }
-  ]);
-
   const previous = root.GladiatusGuildMarketController;
   if (previous?.version === CONTENT_VERSION) return;
   try {
@@ -140,7 +136,7 @@
     return {
       enabled: raw.enabled === true,
       mode: "automatic",
-      rules: [...validation.rules, ...TEST_RULES],
+      rules: validation.rules,
       ruleErrors: validation.errors
     };
   }

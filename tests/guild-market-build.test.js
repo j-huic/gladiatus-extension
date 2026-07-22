@@ -167,9 +167,9 @@ function makePopupElement(options = {}) {
 async function testSettings(settingsFile) {
   {
     const { settings, storage } = loadSettings(settingsFile);
-    assert.deepEqual(clone(await settings.get()), { version: 1, enabled: false, pricePerUnit: 100000 });
+    assert.deepEqual(clone(await settings.get()), { version: 1, enabled: true, pricePerUnit: 100000 });
     assert.deepEqual(storage.getCalls, [settings.storageKey, settings.legacySettingsKey]);
-    assert.deepEqual(storage.state[settings.storageKey], { version: 1, enabled: false, pricePerUnit: 100000 });
+    assert.deepEqual(storage.state[settings.storageKey], { version: 1, enabled: true, pricePerUnit: 100000 });
     storage.getCalls.length = 0;
     await settings.get();
     assert.deepEqual(storage.getCalls, [settings.storageKey], "normal reads must not touch the full-build settings record");
@@ -192,7 +192,7 @@ async function testSettings(settingsFile) {
     const unsubscribe = settings.subscribe((next) => { observed = clone(next); });
     assert.equal(storage.listenerCount(), 1);
     await storage.local.remove(settings.storageKey);
-    assert.deepEqual(observed, { version: 1, enabled: false, pricePerUnit: 100000 });
+    assert.deepEqual(observed, { version: 1, enabled: true, pricePerUnit: 100000 });
     unsubscribe();
     assert.equal(storage.listenerCount(), 0);
   }
@@ -233,8 +233,8 @@ async function testSettings(settingsFile) {
     const { settings, storage } = loadSettings(settingsFile, {
       "glad-guild-market-settings-v1": { version: "bad", enabled: "yes", pricePerUnit: -500 }
     });
-    assert.deepEqual(clone(await settings.get()), { version: 1, enabled: false, pricePerUnit: 100000 });
-    assert.deepEqual(storage.state[settings.storageKey], { version: 1, enabled: false, pricePerUnit: 100000 });
+    assert.deepEqual(clone(await settings.get()), { version: 1, enabled: true, pricePerUnit: 100000 });
+    assert.deepEqual(storage.state[settings.storageKey], { version: 1, enabled: true, pricePerUnit: 100000 });
   }
 }
 
@@ -243,6 +243,7 @@ async function testBackground(packageDir) {
   const settings = env.context.GladiatusGuildMarketSettings;
   const background = env.context.GladiatusGuildMarketBackground;
   await settings.get();
+  await settings.update({ enabled: false });
   assert.equal(env.messageListeners.length, 1);
   assert.equal(env.installedListeners.length, 1);
   assert.equal(background.isKnownMessage({ type: "GLAD_GUILD_MARKET_CONTROL" }), true);
@@ -310,27 +311,23 @@ async function testBackground(packageDir) {
     ruleId: "mini-pumpkin"
   }]);
 
-  await background.handleMessage({
-    type: "GLAD_GUILD_MARKET_FILL",
-    request: {
-      requestId: "request-meat-haunch",
-      stageId: "stage-2",
-      itemName: "Antonius Meat Haunch of domination",
-      quantity: 3,
-      unitPrice: 100000,
-      price: 300000,
-      ruleId: "test-meat-haunch"
-    }
-  }, guildSender());
-  assert.deepEqual(clone(env.executeCalls.at(-1).args[1]), [{
-    requestId: "request-meat-haunch",
-    stageId: "stage-2",
-    itemName: "Antonius Meat Haunch of domination",
-    quantity: 3,
-    unitPrice: 100000,
-    price: 300000,
-    ruleId: "test-meat-haunch"
-  }]);
+  const callsBeforeUnsupportedItem = env.executeCalls.length;
+  await assert.rejects(
+    background.handleMessage({
+      type: "GLAD_GUILD_MARKET_FILL",
+      request: {
+        requestId: "request-unsupported-item",
+        stageId: "stage-2",
+        itemName: "Antonius Meat Haunch of domination",
+        quantity: 3,
+        unitPrice: 100000,
+        price: 300000,
+        ruleId: "test-meat-haunch"
+      }
+    }, guildSender()),
+    (error) => error.code === "INVALID_ITEM"
+  );
+  assert.equal(env.executeCalls.length, callsBeforeUnsupportedItem);
 
   for (const [requestPatch, code] of [
     [{ itemName: "Other Item" }, "INVALID_ITEM"],
@@ -570,11 +567,16 @@ async function testPopup(packageDir) {
   await new Promise((resolve) => setImmediate(resolve));
 
   assert.equal(enabledSwitch.disabled, false);
+  assert.equal(enabledSwitch.attributes["aria-checked"], "true");
+  assert.equal(switchLabel.textContent, "On");
+  assert.equal(unitPrice.value, "100000");
+  assert.equal(unitPrice.disabled, false);
+
+  await enabledSwitch.dispatch("click");
   assert.equal(enabledSwitch.attributes["aria-checked"], "false");
   assert.equal(switchLabel.textContent, "Off");
-  assert.equal(unitPrice.value, "100000");
   assert.equal(unitPrice.disabled, true);
-
+  assert.equal(storage.state[context.GladiatusGuildMarketSettings.storageKey].enabled, false);
   await enabledSwitch.dispatch("click");
   assert.equal(enabledSwitch.attributes["aria-checked"], "true");
   assert.equal(switchLabel.textContent, "On");
@@ -671,6 +673,7 @@ async function main() {
       .map((file) => fs.readFileSync(path.join(packageA, file), "utf8"))
       .join("\n");
     assert.doesNotMatch(packageText, /Apply suggested price|glad-guild-market-apply|GLAD_GUILD_MARKET_APPLY/);
+    assert.doesNotMatch(packageText, /Meat Haunch|test-meat-haunch/, "test-only item rules must not ship");
     const contentSource = fs.readFileSync(path.join(packageA, "guild-market-content.js"), "utf8");
     assert.doesNotMatch(contentSource, /createElement|insertBefore|textContent|innerHTML/,
       "the Guild Market content controller must not inject page UI");

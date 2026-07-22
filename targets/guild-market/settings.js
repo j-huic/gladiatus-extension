@@ -38,7 +38,7 @@
   function defaults() {
     return {
       version: VERSION,
-      enabled: false,
+      enabled: true,
       pricePerUnit: DEFAULT_UNIT_PRICE
     };
   }

@@ -130,9 +130,13 @@ class FakeDocument {
     this.sellForm.id = "sellForm";
     this.price = new FakeElement("input", this);
     this.price.id = "preis";
+    this.duration = new FakeElement("select", this);
+    this.duration.id = "dauer";
+    this.duration.value = "1";
+    this.duration.options = ["1", "2", "3"].map((value) => ({ value }));
     this.sellId = new FakeElement("input", this);
     this.sellId.attributes.name = "sellid";
-    this.sellForm.append(this.price, this.sellId);
+    this.sellForm.append(this.price, this.duration, this.sellId);
     this.body.append(this.sellForm);
   }
 
@@ -249,6 +253,7 @@ function makeContext(document, extra = {}) {
   const doc = new FakeDocument("https://s47-en.gladiatus.gameforge.com/game/index.php?mod=guildMarket&sh=secret");
   let originalCalls = 0;
   let calcDuesCalls = 0;
+  let calcDuesError = null;
   const originalMarketDrop = function marketDrop() {
     originalCalls += 1;
     doc.sellId.value = "ITEM-1";
@@ -258,12 +263,13 @@ function makeContext(document, extra = {}) {
     marketDrop: originalMarketDrop,
     calcDues() {
       calcDuesCalls += 1;
+      if (calcDuesError) throw calcDuesError;
     }
   });
 
   loadScript("guild-market-core.js", context);
   const core = context.GladiatusGuildMarket;
-  assert.equal(core.version, "guild-market-core-v7");
+  assert.equal(core.version, "guild-market-core-v12");
   assert.equal(context.marketDrop, originalMarketDrop, "loading the MAIN core must be inert");
   assert.equal(doc.listenerCount("glad-helper:guild-market:control"), 0, "disabled MAIN core installs no control listener");
   assert.equal(windowListenerCount("message"), 0, "disabled MAIN core installs no window listener");
@@ -271,7 +277,8 @@ function makeContext(document, extra = {}) {
     started: false,
     installed: false,
     waitingForMarketDrop: false,
-    hasStagedItem: false
+    hasStagedItem: false,
+    guardingPrice: false
   });
   assert.equal(core.isGuildMarketUrl(doc.location.href), true);
   assert.equal(core.isGuildMarketUrl("http://s47-en.gladiatus.gameforge.com/game/index.php?mod=guildMarket"), false);
@@ -307,6 +314,7 @@ function makeContext(document, extra = {}) {
   assert.equal(doc.price.value, "6466");
   assert.equal(core.fillPriceField(request).ok, true);
   assert.equal(doc.price.value, "2000000");
+  assert.equal(doc.duration.value, "3", "a matching staged item selects the native 24-hour duration");
   assert.equal(calcDuesCalls, 1);
 
   doc.price.value = "6466";
@@ -330,6 +338,35 @@ function makeContext(document, extra = {}) {
   for (const callback of [...timers.values()]) callback();
   assert.equal(doc.price.value, "2000000", "the guard resumes after focus leaves the field");
 
+  const nativeQuerySelector = doc.querySelector;
+  let hideSellId = true;
+  doc.querySelector = function querySelector(selector) {
+    if (hideSellId && selector === "#sellForm [name=\"sellid\"]") return null;
+    return nativeQuerySelector.call(this, selector);
+  };
+  doc.price.value = "6466";
+  for (const callback of [...timers.values()]) callback();
+  assert.equal(doc.price.value, "6466", "the guard pauses while staged-item identity is temporarily unavailable");
+  assert.equal(core.getStatus().guardingPrice, true, "a transient missing sell id must not cancel the guard");
+  hideSellId = false;
+  for (const callback of [...timers.values()]) callback();
+  assert.equal(doc.price.value, "2000000", "the guard resumes when the same sell id returns");
+  doc.querySelector = nativeQuerySelector;
+
+  context.marketDrop(miniPumpkin, 20);
+  const latestStage = postedMessages.at(-1).detail;
+  calcDuesError = new Error("calcDues failed");
+  const guardedDespiteDuesError = core.fillPriceField({
+    ...request,
+    stageId: latestStage.stageId
+  });
+  assert.equal(guardedDespiteDuesError.ok, true, "fee-refresh failure must not reject an applied price");
+  assert.equal(core.getStatus().guardingPrice, true, "the guard is armed before fee recalculation");
+  doc.price.value = "6466";
+  for (const callback of [...timers.values()]) callback();
+  assert.equal(doc.price.value, "2000000", "the guard survives calcDues errors and restores a clobbered price");
+  calcDuesError = null;
+
   context.marketDrop(miniPumpkin, 20);
   for (const callback of [...timers.values()]) callback();
   assert.equal(doc.price.value, "2000000", "a repeated same-item staging call does not cancel the guard");
@@ -350,8 +387,9 @@ function makeContext(document, extra = {}) {
   context.marketDrop = thirdPartyWrapper;
   core.stop();
   assert.equal(context.marketDrop, thirdPartyWrapper, "stop must not replace a wrapper it no longer owns");
+  const messagesBeforeStoppedDrop = postedMessages.length;
   thirdPartyWrapper(miniPumpkin, 1);
-  assert.equal(staged.length, 1, "an orphaned owned wrapper stays inert after stop");
+  assert.equal(postedMessages.length, messagesBeforeStoppedDrop, "an orphaned owned wrapper stays inert after stop");
 }
 
 async function testIntegratedController() {
@@ -401,6 +439,7 @@ async function testIntegratedController() {
   loadScript("guild-market-content.js", isolated);
 
   const controller = isolated.GladiatusGuildMarketController;
+  assert.equal(controller.version, "guild-market-content-v7");
   const validation = controller.validateRules([
     { id: "one", itemName: " Mini-Pumpkin ", pricePerUnit: 100000, enabled: true },
     { id: "two", itemName: "mini-pumpkin", pricePerUnit: 200000, enabled: true },
@@ -423,7 +462,10 @@ async function testIntegratedController() {
   const settings = {
     enabled: true,
     mode: "automatic",
-    rules: [{ id: "mini", itemName: "Mini-Pumpkin", pricePerUnit: 100000, enabled: true }]
+    rules: [
+      { id: "mini", itemName: "Mini-Pumpkin", pricePerUnit: 100000, enabled: true },
+      { id: "custom-meat", itemName: "Meat Haunch", pricePerUnit: 100000, enabled: true }
+    ]
   };
   assert.equal(await controller.start(settings), true);
   assert.equal(await controller.start(settings), true);

@@ -8,9 +8,11 @@
 // restores an automatic price only when another script overwrites it.
 (() => {
   const root = typeof globalThis !== "undefined" ? globalThis : window;
-  const CORE_VERSION = "guild-market-core-v7";
+  const CORE_VERSION = "guild-market-core-v12";
   const SELLID_SELECTOR = "#sellForm [name=\"sellid\"]";
   const PRICE_FIELD_ID = "preis";
+  const DURATION_FIELD_ID = "dauer";
+  const DURATION_24H_VALUE = "3";
   const INSTALL_RETRY_MS = 100;
   const INSTALL_MAX_ATTEMPTS = 20;
   const PRICE_GUARD_INTERVAL_MS = 50;
@@ -191,12 +193,36 @@
     const validation = validateFillRequest(request, context);
     if (!validation.ok) return validation;
     validation.field.value = String(validation.price);
-    if (typeof context.calcDues === "function") context.calcDues();
+    setDuration24Hours(context);
     startPriceGuard({
       price: validation.price,
       sellId: state.staged.sellId
     }, context);
+    refreshDues(context);
     return { ok: true, price: validation.price, stageId: state.staged.stageId };
+  }
+
+  function setDuration24Hours(context = root) {
+    const doc = context.document || root.document;
+    const field = doc?.getElementById?.(DURATION_FIELD_ID);
+    if (!field) return false;
+    const has24HourOption = Array.from(field.options || [])
+      .some((option) => String(option?.value ?? "") === DURATION_24H_VALUE);
+    if (!has24HourOption) return false;
+    field.value = DURATION_24H_VALUE;
+    return field.value === DURATION_24H_VALUE;
+  }
+
+  function refreshDues(context = root) {
+    if (typeof context.calcDues !== "function") return false;
+    try {
+      context.calcDues();
+      return true;
+    } catch (_error) {
+      // The bounded price guard must survive a broken third-party calcDues
+      // wrapper. Fee refresh can safely be retried on the next reassertion.
+      return false;
+    }
   }
 
   function clearPriceGuard(context = root) {
@@ -207,7 +233,14 @@
   }
 
   function reassertGuardedPrice(guard, context = root) {
-    if (!state.started || readSellId(context) !== guard.sellId) {
+    if (!state.started) {
+      clearPriceGuard(context);
+      return;
+    }
+
+    const currentSellId = readSellId(context);
+    if (guard.sellId && !currentSellId) return;
+    if (currentSellId && currentSellId !== guard.sellId) {
       clearPriceGuard(context);
       return;
     }
@@ -217,7 +250,7 @@
     if (!field) return;
     if (doc.activeElement === field || field.value === String(guard.price)) return;
     field.value = String(guard.price);
-    if (typeof context.calcDues === "function") context.calcDues();
+    refreshDues(context);
   }
 
   function startPriceGuard(details, context = root) {
@@ -309,7 +342,8 @@
       started: state.started,
       installed: Boolean(state.wrapper && context.marketDrop === state.wrapper),
       waitingForMarketDrop: Boolean(state.retryTimer != null),
-      hasStagedItem: Boolean(state.staged)
+      hasStagedItem: Boolean(state.staged),
+      guardingPrice: Boolean(state.priceGuard)
     };
   }
 
@@ -325,6 +359,7 @@
     emitStagedItem,
     validateFillRequest,
     fillPriceField,
+    setDuration24Hours,
     install,
     start,
     update,
