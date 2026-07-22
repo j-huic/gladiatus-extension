@@ -10,7 +10,7 @@
   const STORAGE_KEY = "glad-helper-settings-v1";
   const VERSION = 1;
   const ONBOARDING_VERSION = 1;
-  const FEATURE_IDS = ["auction", "arena", "guildMarket"];
+  const FEATURE_IDS = ["auction", "arena", "smelting", "guildMarket"];
 
   const LEGACY_STORAGE_KEYS = [
     "glad-ah-custom-definitions-v1",
@@ -37,6 +37,7 @@
       "glad-arena-scan-status-v1",
       "glad-arena-self-profile-v1"
     ]),
+    smelting: Object.freeze([]),
     guildMarket: Object.freeze([])
   });
 
@@ -56,6 +57,7 @@
       "glad-arena-self-profile-v1",
       "glad-arena-ui-state-v1"
     ]),
+    smelting: Object.freeze([]),
     guildMarket: Object.freeze([])
   });
 
@@ -98,6 +100,9 @@
           passiveRefresh: false,
           statusWidget: true,
           quickFight: true
+        },
+        smelting: {
+          enabled: false
         },
         guildMarket: {
           enabled: false,
@@ -184,9 +189,11 @@
       : freshDefaults().features;
     const rawAuction = isObject(rawFeatures.auction) ? rawFeatures.auction : {};
     const rawArena = isObject(rawFeatures.arena) ? rawFeatures.arena : {};
+    const rawSmelting = isObject(rawFeatures.smelting) ? rawFeatures.smelting : {};
     const rawGuild = isObject(rawFeatures.guildMarket) ? rawFeatures.guildMarket : {};
     const fallbackAuction = fallbackFeatures.auction || freshDefaults().features.auction;
     const fallbackArena = fallbackFeatures.arena || freshDefaults().features.arena;
+    const fallbackSmelting = fallbackFeatures.smelting || freshDefaults().features.smelting;
     const fallbackGuild = fallbackFeatures.guildMarket || freshDefaults().features.guildMarket;
     const rawOnboarding = isObject(raw.onboarding) ? raw.onboarding : {};
     const fallbackOnboarding = safeFallback.onboarding || freshDefaults().onboarding;
@@ -218,6 +225,9 @@
           passiveRefresh: normalizeBoolean(rawArena.passiveRefresh, fallbackArena.passiveRefresh),
           statusWidget: normalizeBoolean(rawArena.statusWidget, fallbackArena.statusWidget),
           quickFight: normalizeBoolean(rawArena.quickFight, fallbackArena.quickFight)
+        },
+        smelting: {
+          enabled: normalizeBoolean(rawSmelting.enabled, fallbackSmelting.enabled)
         },
         guildMarket: {
           enabled: normalizeBoolean(rawGuild.enabled, fallbackGuild.enabled),

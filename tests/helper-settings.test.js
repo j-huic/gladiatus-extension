@@ -56,14 +56,14 @@ async function testSettings() {
 
   const fresh = plain(settings.freshDefaults());
   assert.equal(fresh.onboarding.completed, false);
-  assert.deepEqual(Object.values(fresh.features).map((feature) => feature.enabled), [false, false, false]);
+  assert.deepEqual(Object.values(fresh.features).map((feature) => feature.enabled), [false, false, false, false]);
   assert.equal(fresh.features.arena.quickFight, true);
   assert.equal(fresh.features.guildMarket.mode, "automatic");
   assert.equal(fresh.features.guildMarket.rules[0].pricePerUnit, 100000);
 
   const legacy = plain(settings.legacyDefaults());
   assert.equal(legacy.onboarding.completed, true);
-  assert.deepEqual(Object.values(legacy.features).map((feature) => feature.enabled), [true, true, true]);
+  assert.deepEqual(Object.values(legacy.features).map((feature) => feature.enabled), [true, true, false, true]);
   assert.equal(legacy.features.auction.applyRankingToPage, false);
   assert.equal(legacy.features.arena.passiveRefresh, false);
   assert.equal(legacy.features.arena.quickFight, true);
@@ -123,7 +123,7 @@ async function testSettings() {
     /Unknown feature/
   );
 
-  for (let mask = 0; mask < 8; mask += 1) {
+  for (let mask = 0; mask < 16; mask += 1) {
     const matrix = settings.freshDefaults();
     settings.featureIds.forEach((id, index) => {
       matrix.features[id].enabled = Boolean(mask & (1 << index));

@@ -25,6 +25,7 @@
       ["arena-passive", "arena", root.GladiatusArenaPassiveFeature || registered.arenaPassive],
       ["arena-status", "arena", root.GladiatusArenaStatusFeature || registered.arenaStatus],
       ["arena-quick-fight", "arena", root.GladiatusArenaHeaderButtonFeature || registered.arenaQuickFight],
+      ["smelting-tooltip", "smelting", root.GladiatusSmeltingTooltipFeature || registered.smelting],
       ["guild-market", "guildMarket", root.GladiatusGuildMarketController || registered.guildMarket]
     ].filter((entry) => entry[2]);
   }

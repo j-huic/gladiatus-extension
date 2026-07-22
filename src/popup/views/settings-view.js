@@ -27,6 +27,12 @@ const FEATURE_DEFINITIONS = [
     ]
   },
   {
+    id: "smelting",
+    title: "Smelting materials",
+    description: "Append the affix-derived material list to compatible native item tooltips.",
+    capabilities: []
+  },
+  {
     id: "guildMarket",
     title: "Guild Market pricing",
     description: "Automatically fill stack prices from matching rules while leaving submission to you.",
@@ -155,7 +161,7 @@ export function createSettingsView({ render, navigate, clearFeatureCache, clearA
     advanced.dataset.featureDetails = definition.id;
     advanced.open = Boolean(state.openFeatureDetails[definition.id]);
     const summary = document.createElement("summary");
-    summary.textContent = definition.id === "guildMarket" ? "Pricing rules" : "Advanced options";
+    summary.textContent = definition.id === "guildMarket" ? "Pricing rules" : definition.id === "smelting" ? "How it works" : "Advanced options";
     advanced.append(summary);
 
     if (definition.capabilities.length) {
@@ -165,8 +171,10 @@ export function createSettingsView({ render, navigate, clearFeatureCache, clearA
         list.append(renderCapability(definition.id, capability, title, help, feature, enabled));
       }
       advanced.append(list);
-    } else {
+    } else if (definition.id === "guildMarket") {
       advanced.append(renderGuildMarketOptions(feature, enabled));
+    } else {
+      advanced.append(paragraph("Material rows are displayed only when both the item title and its affix material data are known. The extension does not alter items or interact with the game.", "setting-help"));
     }
     card.append(advanced);
 

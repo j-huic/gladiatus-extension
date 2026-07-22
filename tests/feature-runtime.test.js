@@ -66,6 +66,7 @@ async function run() {
   const passive = controller();
   const status = controller();
   const quickFight = controller();
+  const smelting = controller();
   const guild = controller();
   const context = {
     console,
@@ -78,6 +79,7 @@ async function run() {
     GladiatusArenaPassiveFeature: passive,
     GladiatusArenaStatusFeature: status,
     GladiatusArenaHeaderButtonFeature: quickFight,
+    GladiatusSmeltingTooltipFeature: smelting,
     GladiatusGuildMarketController: guild
   };
   context.window = context;
@@ -93,7 +95,7 @@ async function run() {
   assert.equal(guild.active, false);
 
   const settingsApi = context.GladiatusFeatureSettings;
-  for (let mask = 0; mask < 8; mask += 1) {
+  for (let mask = 0; mask < 16; mask += 1) {
     const next = settingsApi.freshDefaults();
     settingsApi.featureIds.forEach((id, index) => {
       next.features[id].enabled = Boolean(mask & (1 << index));
@@ -103,6 +105,7 @@ async function run() {
     assert.equal(auction.active, next.features.auction.enabled, `auction state for mask ${mask}`);
     assert.equal(arena.active, next.features.arena.enabled, `arena state for mask ${mask}`);
     assert.equal(quickFight.active, next.features.arena.enabled, `arena quick-fight state for mask ${mask}`);
+    assert.equal(smelting.active, next.features.smelting.enabled, `smelting state for mask ${mask}`);
     assert.equal(guild.active, next.features.guildMarket.enabled, `guild state for mask ${mask}`);
   }
 
@@ -116,6 +119,7 @@ async function run() {
   assert.equal(passive.active, false);
   assert.equal(status.active, false);
   assert.equal(quickFight.active, false);
+  assert.equal(smelting.active, false);
   assert.equal(guild.active, false);
   console.log("feature runtime tests passed");
 }

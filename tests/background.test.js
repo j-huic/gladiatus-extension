@@ -330,7 +330,7 @@ async function run() {
     );
     assert.deepEqual(
       Object.values(updated.localState[SETTINGS_KEY].features).map((feature) => feature.enabled),
-      [true, true, true],
+      [true, true, false, true],
       "pre-settings installations retain discoverability"
     );
 
@@ -342,7 +342,7 @@ async function run() {
     );
     assert.deepEqual(
       Object.values(installed.localState[SETTINGS_KEY].features).map((feature) => feature.enabled),
-      [false, false, false]
+      [false, false, false, false]
     );
   }
 

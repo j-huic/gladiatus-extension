@@ -9,6 +9,7 @@ export const FEATURE_SETTINGS = window.GladiatusFeatureSettings || window.Gladia
 export const featureModules = {
   auction: Boolean(SCHEMA && SCORE && MODEL && CORE),
   arena: Boolean(SCORE && ARENA && ARENA_SIM),
+  smelting: true,
   guildMarket: true
 };
 
