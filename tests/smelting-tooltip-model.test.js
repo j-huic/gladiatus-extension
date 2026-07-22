@@ -22,6 +22,8 @@ assert.deepEqual(
     title: "Antonius Short dagger of Faith",
     prefix: "Antonius",
     suffix: "of Faith",
+    prefixLevel: 92,
+    suffixLevel: 70,
     baseName: "Short dagger",
     materials: {
       "Dragon Scale": 4,
@@ -48,20 +50,22 @@ assert.deepEqual(JSON.parse(JSON.stringify(original)), [
   comparison
 ], "the model does not mutate the game payload");
 assert.deepEqual(
-  JSON.parse(JSON.stringify(enriched.payload[0].slice(-8))),
+  JSON.parse(JSON.stringify(enriched.payload[0].slice(-9))),
   [
-    ["Smelting materials", "#BA9700"],
-    ["4 × Dragon Scale", "#DDD"],
-    ["18 × Amethyst", "#DDD"],
-    ["30 × Crystal", "#DDD"],
-    ["3 × Gold Ore", "#DDD"],
-    ["27 × Waters of Oblivion", "#DDD"],
-    ["6 × Cuprit", "#DDD"],
-    ["8 × Jasper", "#DDD"]
+    ["Antonius (92)", "#BA9700"],
+    ["- 4 × Dragon Scale", "#DDD"],
+    ["- 18 × Amethyst", "#DDD"],
+    ["- 30 × Crystal", "#DDD"],
+    ["- 3 × Gold Ore", "#DDD"],
+    ["of Faith (70)", "#BA9700"],
+    ["- 27 × Waters of Oblivion", "#DDD"],
+    ["- 6 × Cuprit", "#DDD"],
+    ["- 8 × Jasper", "#DDD"]
   ]
 );
 assert.deepEqual(JSON.parse(JSON.stringify(enriched.payload[1])), comparison, "comparison columns remain untouched");
 assert.equal(model.appendMaterials(enriched.payload).changed, false, "enrichment is idempotent");
+assert.equal(model.affixLabel("Antonius", 92), "Antonius (92)");
 assert.equal(model.appendMaterials([[["Plain Short dagger", "white"]]]).changed, false);
 
 console.log("smelting tooltip model tests passed");

@@ -2,7 +2,7 @@
 // the MAIN-world bridge because Gladiatus caches parsed tooltips in page jQuery.
 (() => {
   const root = typeof globalThis !== "undefined" ? globalThis : window;
-  const VERSION = "smelting-tooltip-content-v3";
+  const VERSION = "smelting-tooltip-content-v5";
   const MATERIAL_COLORS_ATTRIBUTE = "data-glad-smelting-material-colors";
   const CONTROL_EVENTS = Object.freeze({
     start: "glad-smelting-tooltip-start-v1",

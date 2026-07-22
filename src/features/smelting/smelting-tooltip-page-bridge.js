@@ -2,7 +2,7 @@
 // smelting module that touches the game's jQuery tooltip cache.
 (() => {
   const root = typeof globalThis !== "undefined" ? globalThis : window;
-  const VERSION = "smelting-tooltip-page-bridge-v1";
+  const VERSION = "smelting-tooltip-page-bridge-v3";
   const MODEL = root.GladiatusSmeltingTooltipModel;
   const pageDocument = root.document || null;
   const ITEM_SELECTOR = "[data-tooltip][class*='item-i-']";

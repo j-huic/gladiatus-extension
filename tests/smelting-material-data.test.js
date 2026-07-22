@@ -13,7 +13,7 @@ vm.runInContext(
 );
 
 const data = context.GladiatusSmeltingMaterialData;
-assert.equal(data.version, "smelting-material-data-v1");
+assert.equal(data.version, "smelting-material-data-v2");
 assert.deepEqual(
   { ...data.materialsFor("prefix", "Antonius") },
   { "Dragon Scale": 4, Amethyst: 18, Crystal: 30, "Gold Ore": 3 }
@@ -35,6 +35,9 @@ assert.deepEqual(
   }
 );
 assert.deepEqual({ ...data.materialsFor("prefix", "Unknown affix") }, {});
+assert.equal(data.levelFor("prefix", "antonius"), 92);
+assert.equal(data.levelFor("suffix", "OF FAITH"), 70);
+assert.equal(data.levelFor("prefix", "Unknown affix"), null);
 assert.ok(data.materialNames.includes("Dragon Scale"));
 assert.ok(data.materialNames.includes("Waters of Oblivion"));
 assert.equal(new Set(data.materialNames).size, data.materialNames.length, "material names are unique");

@@ -74,9 +74,10 @@ for (const file of [
 
   const enrichedAttribute = JSON.parse(item.getAttribute("data-tooltip"));
   const enrichedCache = jQuery(item).data("tooltip");
-  assert.equal(enrichedAttribute[0].at(-8)[0], "Smelting materials");
-  assert.equal(enrichedCache[0].at(-8)[0], "Smelting materials");
-  assert.equal(item.getAttribute("data-glad-smelting-tooltip-version"), "smelting-tooltip-page-bridge-v1");
+  assert.ok(enrichedAttribute[0].some((row) => row[0] === "Antonius (92)"));
+  assert.ok(enrichedAttribute[0].some((row) => row[0] === "of Faith (70)"));
+  assert.ok(enrichedCache[0].some((row) => row[0] === "- 4 × Dragon Scale"));
+  assert.equal(item.getAttribute("data-glad-smelting-tooltip-version"), "smelting-tooltip-page-bridge-v3");
   assert.deepEqual(JSON.parse(JSON.stringify(controller.getStatus())), { active: true });
   assert.deepEqual(JSON.parse(JSON.stringify(bridge.getStatus())), { active: true, enrichedItems: 1 });
 
