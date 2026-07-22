@@ -82,9 +82,14 @@ function validateFillRequest(value, settings) {
     error.code = "INVALID_REQUEST";
     throw error;
   }
-  if (request.ruleId !== "mini-pumpkin"
-    || normalizedItemName(request.itemName) !== normalizedItemName(SETTINGS.itemName)) {
-    const error = new Error("This release only fills prices for Mini-Pumpkin.");
+  const itemRule = request.ruleId === "test-meat-haunch"
+    ? { itemName: "Meat Haunch" }
+    : request.ruleId === "mini-pumpkin"
+      ? { itemName: SETTINGS.itemName }
+      : null;
+  if (!itemRule
+    || !normalizedItemName(request.itemName).includes(normalizedItemName(itemRule.itemName))) {
+    const error = new Error("This release only fills prices for its supported Guild Market items.");
     error.code = "INVALID_ITEM";
     throw error;
   }
@@ -101,7 +106,7 @@ function validateFillRequest(value, settings) {
     || unitPrice !== expectedUnitPrice
     || !Number.isSafeInteger(expectedTotal)
     || expectedTotal !== price) {
-    const error = new Error("The Mini-Pumpkin price no longer matches the saved unit price.");
+    const error = new Error("The supported-item price no longer matches the saved unit price.");
     error.code = "INVALID_PRICE";
     throw error;
   }
@@ -117,7 +122,7 @@ async function stopAndRethrowDisabled(tabId, expectedUnitPrice = null) {
     throw error;
   }
   if (expectedUnitPrice !== null && settings.pricePerUnit !== expectedUnitPrice) {
-    const error = new Error("The saved Mini-Pumpkin unit price changed. Stage the item again.");
+    const error = new Error("The saved supported-item unit price changed. Stage the item again.");
     error.code = "STALE_SETTING";
     throw error;
   }

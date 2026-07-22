@@ -4,14 +4,17 @@
 // module deliberately does nothing to them when it is loaded. The isolated
 // guild-market controller starts the bridge when the feature is enabled, reads
 // the staged-item event, and sends one immediate price-fill request for a
-// matching rule. No code here submits the sell form or reasserts a user edit.
+// matching rule. No code here submits the sell form. A short, bounded guard
+// restores an automatic price only when another script overwrites it.
 (() => {
   const root = typeof globalThis !== "undefined" ? globalThis : window;
-  const CORE_VERSION = "guild-market-core-v5";
+  const CORE_VERSION = "guild-market-core-v7";
   const SELLID_SELECTOR = "#sellForm [name=\"sellid\"]";
   const PRICE_FIELD_ID = "preis";
   const INSTALL_RETRY_MS = 100;
   const INSTALL_MAX_ATTEMPTS = 20;
+  const PRICE_GUARD_INTERVAL_MS = 50;
+  const PRICE_GUARD_DURATION_MS = 1500;
   const EVENTS = Object.freeze({
     source: "glad-helper:guild-market-main",
     staged: "staged"
@@ -44,7 +47,8 @@
     retryTimer: null,
     retryAttempts: 0,
     stageSequence: 0,
-    staged: null
+    staged: null,
+    priceGuard: null
   };
 
   function isGuildMarketUrl(url) {
@@ -188,7 +192,49 @@
     if (!validation.ok) return validation;
     validation.field.value = String(validation.price);
     if (typeof context.calcDues === "function") context.calcDues();
+    startPriceGuard({
+      price: validation.price,
+      sellId: state.staged.sellId
+    }, context);
     return { ok: true, price: validation.price, stageId: state.staged.stageId };
+  }
+
+  function clearPriceGuard(context = root) {
+    const guard = state.priceGuard;
+    if (!guard) return;
+    if (guard.timer != null) context.clearInterval?.(guard.timer);
+    state.priceGuard = null;
+  }
+
+  function reassertGuardedPrice(guard, context = root) {
+    if (!state.started || readSellId(context) !== guard.sellId) {
+      clearPriceGuard(context);
+      return;
+    }
+
+    const doc = context.document || root.document;
+    const field = doc?.getElementById?.(PRICE_FIELD_ID);
+    if (!field) return;
+    if (doc.activeElement === field || field.value === String(guard.price)) return;
+    field.value = String(guard.price);
+    if (typeof context.calcDues === "function") context.calcDues();
+  }
+
+  function startPriceGuard(details, context = root) {
+    clearPriceGuard(context);
+    if (typeof context.setInterval !== "function") return;
+
+    let checks = 0;
+    const guard = {
+      ...details,
+      timer: null
+    };
+    guard.timer = context.setInterval(() => {
+      checks += 1;
+      reassertGuardedPrice(guard, context);
+      if (checks >= PRICE_GUARD_DURATION_MS / PRICE_GUARD_INTERVAL_MS) clearPriceGuard(context);
+    }, PRICE_GUARD_INTERVAL_MS);
+    state.priceGuard = guard;
   }
 
   function clearInstallRetry(context = root) {
@@ -248,6 +294,7 @@
   function stop(context = root) {
     state.started = false;
     clearInstallRetry(context);
+    clearPriceGuard(context);
     if (state.wrapper && context.marketDrop === state.wrapper && typeof state.original === "function") {
       context.marketDrop = state.original;
     }

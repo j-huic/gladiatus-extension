@@ -85,6 +85,10 @@ class FakeElement {
     this.listeners.set(type, listeners);
   }
 
+  removeEventListener(type, listener) {
+    this.listeners.get(type)?.delete(listener);
+  }
+
   dispatchEvent(event) {
     for (const listener of this.listeners.get(event.type) || []) listener.call(this, event);
     return true;
@@ -250,7 +254,7 @@ function makeContext(document, extra = {}) {
     doc.sellId.value = "ITEM-1";
     doc.price.value = "6466";
   };
-  const { context, postedMessages, windowListenerCount } = makeContext(doc, {
+  const { context, postedMessages, timers, windowListenerCount } = makeContext(doc, {
     marketDrop: originalMarketDrop,
     calcDues() {
       calcDuesCalls += 1;
@@ -259,7 +263,7 @@ function makeContext(document, extra = {}) {
 
   loadScript("guild-market-core.js", context);
   const core = context.GladiatusGuildMarket;
-  assert.equal(core.version, "guild-market-core-v5");
+  assert.equal(core.version, "guild-market-core-v7");
   assert.equal(context.marketDrop, originalMarketDrop, "loading the MAIN core must be inert");
   assert.equal(doc.listenerCount("glad-helper:guild-market:control"), 0, "disabled MAIN core installs no control listener");
   assert.equal(windowListenerCount("message"), 0, "disabled MAIN core installs no window listener");
@@ -304,6 +308,31 @@ function makeContext(document, extra = {}) {
   assert.equal(core.fillPriceField(request).ok, true);
   assert.equal(doc.price.value, "2000000");
   assert.equal(calcDuesCalls, 1);
+
+  doc.price.value = "6466";
+  for (const callback of [...timers.values()]) callback();
+  assert.equal(doc.price.value, "2000000", "a delayed competing write is restored during the bounded guard");
+  assert.equal(calcDuesCalls, 2);
+
+  doc.price.remove();
+  doc.price = new FakeElement("input", doc);
+  doc.price.id = "preis";
+  doc.sellForm.insertBefore(doc.price, doc.sellId);
+  doc.price.value = "6466";
+  for (const callback of [...timers.values()]) callback();
+  assert.equal(doc.price.value, "2000000", "the guard follows a replacement price field");
+
+  doc.price.value = "12345";
+  doc.activeElement = doc.price;
+  for (const callback of [...timers.values()]) callback();
+  assert.equal(doc.price.value, "12345", "the guard never fights a user editing the field");
+  doc.activeElement = null;
+  for (const callback of [...timers.values()]) callback();
+  assert.equal(doc.price.value, "2000000", "the guard resumes after focus leaves the field");
+
+  context.marketDrop(miniPumpkin, 20);
+  for (const callback of [...timers.values()]) callback();
+  assert.equal(doc.price.value, "2000000", "a repeated same-item staging call does not cancel the guard");
 
   doc.sellId.value = "ITEM-2";
   assert.equal(core.fillPriceField(request).code, "STALE_ITEM");
@@ -382,6 +411,13 @@ async function testIntegratedController() {
   assert.deepEqual(Array.from(validation.errors, (error) => error.code), ["DUPLICATE_ITEM", "INVALID_UNIT_PRICE"]);
   assert.equal(controller.matchRule("MINI- PUMPKIN", validation.rules), null);
   assert.equal(controller.matchRule("mini-pumpkin", validation.rules).id, "one");
+  assert.equal(
+    controller.matchRule("Antonius Meat Haunch of domination", [
+      { id: "test-meat-haunch", itemName: "Meat Haunch", pricePerUnit: 100000, enabled: true }
+    ]).id,
+    "test-meat-haunch",
+    "matching rules use the configured item-name substring"
+  );
   assert.equal(controller.calculateSuggestion({ quantity: Number.MAX_SAFE_INTEGER }, { pricePerUnit: 2 }), null);
 
   const settings = {
@@ -405,6 +441,13 @@ async function testIntegratedController() {
   assert.equal(calcDuesCalls, 1);
   assert.equal(doc.getElementById("glad-guild-market-suggestion"), null, "automatic pricing injects no page panel");
   assert.equal(doc.getElementById("glad-guild-market-style"), null, "automatic pricing injects no page styles");
+
+  const meatHaunch = new FakeElement("div", doc);
+  meatHaunch.dataset.tooltip = '[["Antonius Meat Haunch of domination"]]';
+  meatHaunch.sellId = "ITEM-2";
+  main.marketDrop(meatHaunch, 3);
+  await settle();
+  assert.equal(doc.price.value, "300000", "Meat Haunch variants use the matching substring rule");
 
   doc.price.value = "12345";
   await settle();

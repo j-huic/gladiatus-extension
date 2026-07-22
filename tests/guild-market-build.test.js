@@ -176,12 +176,7 @@ async function testSettings(settingsFile) {
     assert.deepEqual(clone(settings.toFeatureSettings({ enabled: true, pricePerUnit: 123456 })), {
       enabled: true,
       mode: "automatic",
-      rules: [{
-        id: "mini-pumpkin",
-        itemName: "Mini-Pumpkin",
-        pricePerUnit: 123456,
-        enabled: true
-      }]
+      rules: [{ id: "mini-pumpkin", itemName: "Mini-Pumpkin", pricePerUnit: 123456, enabled: true }]
     });
     assert.deepEqual(clone(await settings.update({ enabled: true, pricePerUnit: 250000 })), {
       version: 1,
@@ -313,6 +308,28 @@ async function testBackground(packageDir) {
     unitPrice: 100000,
     price: 2000000,
     ruleId: "mini-pumpkin"
+  }]);
+
+  await background.handleMessage({
+    type: "GLAD_GUILD_MARKET_FILL",
+    request: {
+      requestId: "request-meat-haunch",
+      stageId: "stage-2",
+      itemName: "Antonius Meat Haunch of domination",
+      quantity: 3,
+      unitPrice: 100000,
+      price: 300000,
+      ruleId: "test-meat-haunch"
+    }
+  }, guildSender());
+  assert.deepEqual(clone(env.executeCalls.at(-1).args[1]), [{
+    requestId: "request-meat-haunch",
+    stageId: "stage-2",
+    itemName: "Antonius Meat Haunch of domination",
+    quantity: 3,
+    unitPrice: 100000,
+    price: 300000,
+    ruleId: "test-meat-haunch"
   }]);
 
   for (const [requestPatch, code] of [

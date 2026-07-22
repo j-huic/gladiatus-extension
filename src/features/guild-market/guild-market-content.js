@@ -2,10 +2,10 @@
 //
 // Pricing rules live here. After the game stages a matching item, this
 // controller silently asks the page-world bridge to fill #preis. It injects no
-// page UI, never submits the form, and never reasserts after user edits.
+// page UI and never submits the form.
 (() => {
   const root = typeof globalThis !== "undefined" ? globalThis : window;
-  const CONTENT_VERSION = "guild-market-content-v4";
+  const CONTENT_VERSION = "guild-market-content-v5";
   const LEGACY_UI_IDS = Object.freeze([
     "glad-guild-market-suggestion",
     "glad-guild-market-style"
@@ -19,12 +19,12 @@
     control: "GLAD_GUILD_MARKET_CONTROL",
     fill: "GLAD_GUILD_MARKET_FILL"
   });
-  const DEFAULT_RULES = Object.freeze([{
-    id: "mini-pumpkin",
-    itemName: "Mini-Pumpkin",
-    pricePerUnit: 100000,
-    enabled: true
-  }]);
+  const DEFAULT_RULES = Object.freeze([
+    { id: "mini-pumpkin", itemName: "Mini-Pumpkin", pricePerUnit: 100000, enabled: true }
+  ]);
+  const TEST_RULES = Object.freeze([
+    { id: "test-meat-haunch", itemName: "Meat Haunch", pricePerUnit: 100000, enabled: true }
+  ]);
 
   const previous = root.GladiatusGuildMarketController;
   if (previous?.version === CONTENT_VERSION) return;
@@ -112,9 +112,10 @@
   function matchRule(itemName, rules) {
     const normalizedName = normalizeItemName(itemName);
     if (!normalizedName) return null;
-    return (Array.isArray(rules) ? rules : []).find((rule) => (
-      rule?.enabled === true && normalizeItemName(rule.itemName) === normalizedName
-    )) || null;
+    const enabledRules = (Array.isArray(rules) ? rules : []).filter((rule) => rule?.enabled === true);
+    return enabledRules.find((rule) => normalizeItemName(rule.itemName) === normalizedName)
+      || enabledRules.find((rule) => normalizedName.includes(normalizeItemName(rule.itemName)))
+      || null;
   }
 
   function calculateSuggestion(staged, rule) {
@@ -139,7 +140,7 @@
     return {
       enabled: raw.enabled === true,
       mode: "automatic",
-      rules: validation.rules,
+      rules: [...validation.rules, ...TEST_RULES],
       ruleErrors: validation.errors
     };
   }

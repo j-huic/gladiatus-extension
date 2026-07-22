@@ -9,7 +9,9 @@
   const STORAGE_KEY = "glad-guild-market-settings-v1";
   const LEGACY_SETTINGS_KEY = "glad-helper-settings-v1";
   const VERSION = 1;
-  const ITEM_NAME = "Mini-Pumpkin";
+  const ITEM_RULES = Object.freeze([
+    Object.freeze({ id: "mini-pumpkin", itemName: "Mini-Pumpkin" })
+  ]);
   const DEFAULT_UNIT_PRICE = 100000;
 
   function clone(value) {
@@ -61,7 +63,7 @@
     const guild = isObject(value?.features?.guildMarket) ? value.features.guildMarket : null;
     if (!guild) return null;
     const miniPumpkinRule = Array.isArray(guild.rules)
-      ? guild.rules.find((rule) => normalizedName(rule?.itemName) === normalizedName(ITEM_NAME))
+      ? guild.rules.find((rule) => normalizedName(rule?.itemName) === normalizedName(ITEM_RULES[0].itemName))
       : null;
     const pricePerUnit = positiveSafeInteger(miniPumpkinRule?.pricePerUnit);
     return normalize({
@@ -137,12 +139,7 @@
     return {
       enabled: settings.enabled,
       mode: "automatic",
-      rules: [{
-        id: "mini-pumpkin",
-        itemName: ITEM_NAME,
-        pricePerUnit: settings.pricePerUnit,
-        enabled: true
-      }]
+      rules: ITEM_RULES.map((rule) => ({ ...rule, pricePerUnit: settings.pricePerUnit, enabled: true }))
     };
   }
 
@@ -150,7 +147,7 @@
     version: VERSION,
     storageKey: STORAGE_KEY,
     legacySettingsKey: LEGACY_SETTINGS_KEY,
-    itemName: ITEM_NAME,
+    itemName: ITEM_RULES[0].itemName,
     defaultUnitPrice: DEFAULT_UNIT_PRICE,
     defaults,
     normalize,
