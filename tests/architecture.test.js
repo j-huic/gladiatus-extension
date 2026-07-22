@@ -632,6 +632,9 @@ const { schema, score, model, core, arena, sim } = loadGlobals();
   assert.equal(arenaRepairFiles.includes("src/features/arena/arena-background-scan.js"), false);
 
   assert.deepEqual(mainEntry.js, [
+    "src/features/smelting/smelting-material-data.js",
+    "src/features/smelting/smelting-tooltip-model.js",
+    "src/features/smelting/smelting-tooltip-page-bridge.js",
     "src/features/auction/auction-schema.js",
     "src/shared/tooltip-parser.js",
     "src/features/auction/auction-core.js",
@@ -643,8 +646,6 @@ const { schema, score, model, core, arena, sim } = loadGlobals();
     "src/shared/helper-settings.js",
     "src/shared/logging/log-core.js",
     "src/shared/logging/log-setup.js",
-    "src/features/smelting/smelting-material-data.js",
-    "src/features/smelting/smelting-tooltip-model.js",
     "src/features/auction/auction-schema.js",
     "src/shared/tooltip-parser.js",
     "src/shared/score-model.js",

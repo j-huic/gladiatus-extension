@@ -15,13 +15,13 @@
   "content_scripts": [
     {
       "matches": ["https://*.gladiatus.gameforge.com/game/*"],
-      "js": ["src/features/auction/auction-schema.js", "src/shared/tooltip-parser.js", "src/features/auction/auction-core.js", "src/features/guild-market/guild-market-core.js"],
+      "js": ["src/features/smelting/smelting-material-data.js", "src/features/smelting/smelting-tooltip-model.js", "src/features/smelting/smelting-tooltip-page-bridge.js", "src/features/auction/auction-schema.js", "src/shared/tooltip-parser.js", "src/features/auction/auction-core.js", "src/features/guild-market/guild-market-core.js"],
       "run_at": "document_idle",
       "world": "MAIN"
     },
     {
       "matches": ["https://*.gladiatus.gameforge.com/game/*"],
-      "js": ["src/shared/helper-security.js", "src/shared/helper-settings.js", "src/shared/logging/log-core.js", "src/shared/logging/log-setup.js", "src/features/smelting/smelting-material-data.js", "src/features/smelting/smelting-tooltip-model.js", "src/features/auction/auction-schema.js", "src/shared/tooltip-parser.js", "src/shared/score-model.js", "src/features/auction/auction-model.js", "src/features/auction/auction-core.js", "src/features/arena/arena-core.js", "src/features/arena/arena-sim.js", "src/features/arena/arena-scan.js", "src/features/arena/arena-passive-content.js", "src/features/arena/arena-fight.js", "src/features/arena/arena-header-button.js", "src/features/arena/arena-status-content.js", "src/features/smelting/smelting-tooltip-content.js", "src/features/guild-market/guild-market-content.js", "src/features/auction/auction-content.js", "src/features/arena/arena-content.js", "src/runtime/feature-runtime.js"],
+      "js": ["src/shared/helper-security.js", "src/shared/helper-settings.js", "src/shared/logging/log-core.js", "src/shared/logging/log-setup.js", "src/features/auction/auction-schema.js", "src/shared/tooltip-parser.js", "src/shared/score-model.js", "src/features/auction/auction-model.js", "src/features/auction/auction-core.js", "src/features/arena/arena-core.js", "src/features/arena/arena-sim.js", "src/features/arena/arena-scan.js", "src/features/arena/arena-passive-content.js", "src/features/arena/arena-fight.js", "src/features/arena/arena-header-button.js", "src/features/arena/arena-status-content.js", "src/features/smelting/smelting-tooltip-content.js", "src/features/guild-market/guild-market-content.js", "src/features/auction/auction-content.js", "src/features/arena/arena-content.js", "src/runtime/feature-runtime.js"],
       "css": ["src/shared/styles.css"],
       "run_at": "document_idle"
     }
