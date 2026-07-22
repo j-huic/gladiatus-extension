@@ -74,6 +74,22 @@ test("CON bump: +25 HP per point, hp tracks maxHp", () => {
   assert.equal(c.hp, 3250);
 });
 
+test("armour bump re-derives the marginal absorption range", () => {
+  const base = {
+    ...baseCombatant(),
+    armour: 12079,
+    armourAbsorbMin: 164,
+    armourAbsorbMax: 201,
+  };
+  assert.deepEqual({ ...W.armourAbsorption(12079) }, { min: 164, max: 201 });
+
+  const bumped = W.bumpCombatant(base, "armour", 500);
+  assert.equal(bumped.armour, 12579);
+  assert.equal(bumped.armourAbsorbMin, 171);
+  assert.equal(bumped.armourAbsorbMax, 209);
+  assert.equal(base.armour, 12079);
+});
+
 test("CHA/INT bump: only the raw field changes", () => {
   const cha = W.bumpCombatant(baseCombatant(), "charisma", 10);
   assert.equal(cha.charisma, 50);
@@ -108,7 +124,11 @@ test("computeStatWeights: CRN pairing, ranking, error bars, normalization", () =
   const by = Object.fromEntries(result.rows.map((r) => [r.stat, r]));
 
   assert.ok(result.refScore > 0.49 && result.refScore < 0.51, `refScore ${result.refScore}`);
-  assert.equal(result.rows.length, 6);
+  assert.equal(result.mode, "arena");
+  assert.equal(result.maxRounds, 15);
+  assert.equal(result.firstAttacker, "coinflip");
+  assert.equal(result.rows.length, 7);
+  assert.equal(by.armour.bump, 500);
 
   // STR: +1 damageMax -> adv 1 -> pWin 0.51 -> delta ~0.01
   assert.ok(by.strength.deltaScore > 0.006 && by.strength.deltaScore < 0.016, `STR ${by.strength.deltaScore}`);
@@ -126,11 +146,76 @@ test("computeStatWeights: CRN pairing, ranking, error bars, normalization", () =
   assert.ok(by.strength.se > 0, "STR has real sampling error");
 });
 
+test("computeStatWeights uses a fixed expedition target and expedition rules", () => {
+  const sim = {
+    ...fakeSim,
+    resolveBattleRules() {
+      return { mode: "expedition", maxRounds: 15, firstAttacker: "defender" };
+    },
+    expeditionMonsterFromStats(monster) {
+      return { ...monster, critAvoidChance: 0 };
+    },
+  };
+  const target = { ...baseCombatant(), name: "Set Monster", maxHp: 2800, hp: 2800 };
+  const result = W.computeStatWeights({
+    sim,
+    baseline: baseCombatant(),
+    mode: "expedition",
+    opponent: target,
+    stats: ["strength"],
+    iterations: 1000,
+    seed: 9,
+  });
+
+  assert.equal(result.mode, "expedition");
+  assert.equal(result.maxRounds, 15);
+  assert.equal(result.firstAttacker, "defender");
+  assert.equal(result.opponentName, "Set Monster");
+});
+
+test("computeStatWeights rejects expedition runs without a fixed target", () => {
+  assert.throws(
+    () => W.computeStatWeights({ sim: fakeSim, baseline: baseCombatant(), mode: "expedition" }),
+    /require a fixed opponent/,
+  );
+});
+
 test("formatWeightsTable renders header meta and one line per stat", () => {
   const result = W.computeStatWeights({ sim: fakeSim, baseline: baseCombatant(), n: 10, iterations: 2000, seed: 5 });
   const text = W.formatWeightsTable(result, { name: "Testus", level: 42 });
   assert.match(text, /Testus/);
   assert.match(text, /level 42/);
+  assert.match(text, /armour N=500, arena 15 rounds\/coinflip/);
   assert.match(text, /mirror baseline 0\.5/);
-  for (const stat of W.STAT_KEYS) assert.match(text, new RegExp(stat));
+  for (const stat of W.WEIGHT_KEYS) assert.match(text, new RegExp(stat));
+});
+
+test("calculateTrainingEfficiency ranks marginal value per gold", () => {
+  const result = W.calculateTrainingEfficiency(
+    { strength: 0.0003, dexterity: 0.001, agility: 0.001 },
+    { strength: 100_000, dexterity: 500_000, agility: 250_000 },
+  );
+  const by = Object.fromEntries(result.rows.map((row) => [row.stat, row]));
+
+  assert.equal(result.bestStat, "agility");
+  assert.equal(result.rows[0].stat, "agility");
+  approx(by.agility.valuePerMillionGold, 0.004);
+  approx(by.strength.valuePerMillionGold, 0.003);
+  approx(by.dexterity.valuePerMillionGold, 0.002);
+  approx(by.agility.normalized, 1);
+  approx(by.strength.normalized, 0.75);
+  assert.equal(by.constitution.costPerPoint, null);
+  assert.equal(by.constitution.valuePerGold, null);
+});
+
+test("trainingEfficiencyFromWeights accepts computeStatWeights rows", () => {
+  const efficiency = W.trainingEfficiencyFromWeights({
+    rows: [
+      { stat: "strength", perPoint: 0.0002 },
+      { stat: "dexterity", perPoint: 0.0004 },
+    ],
+  }, { strength: 100, dexterity: 400 });
+
+  assert.equal(efficiency.bestStat, "strength");
+  assert.match(W.formatTrainingEfficiencyTable(efficiency), /score\/1M gold/);
 });

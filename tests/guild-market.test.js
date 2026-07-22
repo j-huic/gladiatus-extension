@@ -403,10 +403,8 @@ async function testIntegratedController() {
   await settle();
   assert.equal(doc.price.value, "2000000", "a matching rule must fill automatically");
   assert.equal(calcDuesCalls, 1);
-  const panel = doc.getElementById("glad-guild-market-suggestion");
-  assert.ok(panel);
-  assert.equal(panel.querySelector(".glad-guild-market-apply"), null, "automatic pricing has no approval button");
-  assert.match(doc.getElementById("glad-guild-market-status").textContent, /automatically/);
+  assert.equal(doc.getElementById("glad-guild-market-suggestion"), null, "automatic pricing injects no page panel");
+  assert.equal(doc.getElementById("glad-guild-market-style"), null, "automatic pricing injects no page styles");
 
   doc.price.value = "12345";
   await settle();
@@ -416,7 +414,6 @@ async function testIntegratedController() {
   doc.sellId.value = "DIFFERENT-ITEM";
   await settle();
   assert.equal(doc.price.value, "7000", "a stale automatic calculation must not overwrite the field");
-  assert.match(doc.getElementById("glad-guild-market-status").textContent, /changed/);
 
   await controller.stop();
   await controller.stop();

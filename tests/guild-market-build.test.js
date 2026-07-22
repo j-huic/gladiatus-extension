@@ -654,6 +654,9 @@ async function main() {
       .map((file) => fs.readFileSync(path.join(packageA, file), "utf8"))
       .join("\n");
     assert.doesNotMatch(packageText, /Apply suggested price|glad-guild-market-apply|GLAD_GUILD_MARKET_APPLY/);
+    const contentSource = fs.readFileSync(path.join(packageA, "guild-market-content.js"), "utf8");
+    assert.doesNotMatch(contentSource, /createElement|insertBefore|textContent|innerHTML/,
+      "the Guild Market content controller must not inject page UI");
     for (const [label, pattern] of [
       ["unrelated feature name", /\b(?:auction|arena)\b/i],
       ["unrelated message route", /GLAD_(?:AUCTION|ARENA|FEATURE_REPAIR)/],

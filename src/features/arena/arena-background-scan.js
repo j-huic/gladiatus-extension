@@ -698,7 +698,8 @@
   }
 
   function simulateSingleOpponent(selfProfile, opponentResult) {
-    if (!SIM?.simulationReadiness || !SIM?.simulateOddsPvP) {
+    const simulateArena = SIM?.simulateOddsArena || SIM?.simulateOddsPvP;
+    if (!SIM?.simulationReadiness || !simulateArena) {
       log("single simulation unavailable", {
         name: opponentResult?.displayName || opponentResult?.opponent?.name || "",
         missing: ["simulation engine"]
@@ -717,7 +718,7 @@
       return simulationUnavailable(readiness.missing, readiness.warnings);
     }
 
-    const simulation = SIM.simulateOddsPvP(
+    const simulation = simulateArena(
       selfProfile.character.combat.combatant,
       opponentResult.character.combat.combatant
     );

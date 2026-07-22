@@ -1,14 +1,15 @@
 // Isolated-world guild-market pricing controller.
 //
-// Pricing rules and UI live here. After the game stages a matching item, this
-// controller immediately asks the page-world bridge to fill #preis. It never
-// submits the Guild Market form or reasserts the value after user edits.
+// Pricing rules live here. After the game stages a matching item, this
+// controller silently asks the page-world bridge to fill #preis. It injects no
+// page UI, never submits the form, and never reasserts after user edits.
 (() => {
   const root = typeof globalThis !== "undefined" ? globalThis : window;
-  const CONTENT_VERSION = "guild-market-content-v3";
-  const PANEL_ID = "glad-guild-market-suggestion";
-  const STYLE_ID = "glad-guild-market-style";
-  const STATUS_ID = "glad-guild-market-status";
+  const CONTENT_VERSION = "guild-market-content-v4";
+  const LEGACY_UI_IDS = Object.freeze([
+    "glad-guild-market-suggestion",
+    "glad-guild-market-style"
+  ]);
   const FILL_TIMEOUT_MS = 1500;
   const PAGE_MESSAGES = Object.freeze({
     source: "glad-helper:guild-market-main",
@@ -32,6 +33,12 @@
   } catch (_error) {
     // A stale controller must not block the safe replacement.
   }
+
+  function removeLegacyUi() {
+    for (const id of LEGACY_UI_IDS) root.document?.getElementById?.(id)?.remove?.();
+  }
+
+  removeLegacyUi();
 
   const state = {
     started: false,
@@ -158,135 +165,22 @@
     state.timers.clear();
   }
 
-  function ensureStyles() {
-    const doc = root.document;
-    if (!doc || doc.getElementById(STYLE_ID)) return;
-    const style = doc.createElement("style");
-    style.id = STYLE_ID;
-    style.textContent = `
-      #${PANEL_ID}.glad-guild-market-suggestion {
-        box-sizing: border-box;
-        margin: 8px 0;
-        padding: 9px 10px;
-        max-width: 430px;
-        border: 1px solid #73552d;
-        border-radius: 4px;
-        background: #f4e8c8;
-        color: #2f2416;
-        font: 12px/1.4 Arial, sans-serif;
-      }
-      #${PANEL_ID} .glad-guild-market-title { font-weight: 700; margin-bottom: 4px; }
-      #${PANEL_ID} .glad-guild-market-calculation { font-size: 13px; margin: 5px 0; }
-      #${PANEL_ID} .glad-guild-market-note { color: #5e4c34; margin: 4px 0; }
-      #${PANEL_ID} .glad-guild-market-status { min-height: 1.4em; margin-top: 4px; }
-      #${PANEL_ID} .glad-guild-market-error { color: #8b1e16; }
-    `;
-    (doc.head || doc.documentElement)?.append?.(style);
-  }
-
-  function removeOwnedUi() {
-    root.document?.getElementById?.(PANEL_ID)?.remove?.();
-    root.document?.getElementById?.(STYLE_ID)?.remove?.();
-  }
-
-  function appendTextElement(parent, tagName, className, text) {
-    const element = root.document.createElement(tagName);
-    if (className) element.className = className;
-    element.textContent = text;
-    parent.append(element);
-    return element;
-  }
-
-  function ensurePanel() {
-    const doc = root.document;
-    if (!doc) return null;
-    let panel = doc.getElementById(PANEL_ID);
-    if (panel) return panel;
-    const priceField = doc.getElementById("preis");
-    const sellForm = doc.querySelector?.("#sellForm");
-    if (!priceField && !sellForm) return null;
-
-    panel = doc.createElement("section");
-    panel.id = PANEL_ID;
-    panel.className = "glad-guild-market-suggestion";
-    panel.setAttribute("aria-label", "Guild Market automatic price helper");
-    if (priceField?.parentNode) {
-      priceField.parentNode.insertBefore(panel, priceField.nextSibling);
-    } else {
-      sellForm.append(panel);
-    }
-    return panel;
-  }
-
-  function formatGold(value) {
-    try {
-      return new Intl.NumberFormat().format(value);
-    } catch {
-      return String(value);
-    }
-  }
-
-  function setStatus(text, error = false) {
-    const status = root.document?.getElementById?.(STATUS_ID);
-    if (!status) return;
-    status.textContent = text;
-    status.classList?.toggle?.("glad-guild-market-error", error);
-  }
-
   function clearPending() {
     if (!state.pending) return;
     clearTimer(state.pending.timer);
     state.pending = null;
   }
 
-  function render() {
-    if (!state.started || !state.staged) {
-      root.document?.getElementById?.(PANEL_ID)?.remove?.();
-      return null;
-    }
-    ensureStyles();
-    const panel = ensurePanel();
-    if (!panel) return null;
-    panel.replaceChildren();
-
-    appendTextElement(panel, "div", "glad-guild-market-title", "Guild Market price helper");
-    if (!state.staged.itemName) {
-      appendTextElement(panel, "div", "glad-guild-market-error", "The staged item name could not be read.");
-      return null;
-    }
-
+  function priceCandidate() {
+    if (!state.started || !state.staged?.itemName) return null;
     const rule = matchRule(state.staged.itemName, state.settings.rules);
-    if (!rule) {
-      appendTextElement(panel, "div", "", `No enabled pricing rule matches “${state.staged.itemName}”.`);
-      if (state.settings.ruleErrors.length) {
-        appendTextElement(panel, "div", "glad-guild-market-error", state.settings.ruleErrors[0].error);
-      }
-      return null;
-    }
-
+    if (!rule) return null;
     const suggestion = calculateSuggestion(state.staged, rule);
-    if (!suggestion) {
-      appendTextElement(panel, "div", "glad-guild-market-error", "This stack cannot be priced safely. Check its quantity and pricing rule.");
-      return null;
-    }
-
-    appendTextElement(panel, "div", "", `${state.staged.itemName} matches “${rule.itemName}”.`);
-    appendTextElement(
-      panel,
-      "div",
-      "glad-guild-market-calculation",
-      `${formatGold(suggestion.quantity)} × ${formatGold(suggestion.unitPrice)} = ${formatGold(suggestion.price)} gold`
-    );
-    appendTextElement(panel, "p", "glad-guild-market-note", "The price field is filled automatically. Review it before listing the item.");
-
-    const status = appendTextElement(panel, "div", "glad-guild-market-status", "");
-    status.id = STATUS_ID;
-    status.setAttribute("aria-live", "polite");
-    return { rule, suggestion };
+    return suggestion ? { rule, suggestion } : null;
   }
 
-  function renderAndFill() {
-    const candidate = render();
+  function fillCurrentStage() {
+    const candidate = priceCandidate();
     if (!candidate) return;
     requestFill(candidate.rule, candidate.suggestion).catch((error) => {
       onFilled({
@@ -299,14 +193,12 @@
 
   async function requestFill(rule, suggestion) {
     if (!state.started || !state.staged || state.pending) return;
-    setStatus("Filling price automatically…");
 
     state.requestSequence += 1;
     const requestId = `guild-price-${state.requestSequence}`;
     const timer = addTimer(() => {
       if (state.pending?.requestId !== requestId) return;
       state.pending = null;
-      setStatus("The page did not accept the price. Stage the item again.", true);
     }, FILL_TIMEOUT_MS);
     state.pending = { requestId, timer };
     const request = {
@@ -345,14 +237,12 @@
       quantity: positiveSafeInteger(staged.quantity),
       defaultPrice: String(staged.defaultPrice || "")
     };
-    renderAndFill();
+    fillCurrentStage();
   }
 
   function onFilled(result) {
     if (!state.started || !state.pending || result?.requestId !== state.pending.requestId) return;
     clearPending();
-    if (result.ok) setStatus(`Filled ${formatGold(result.price)} gold automatically. Review before listing.`);
-    else setStatus(result.error || "The price field could not be filled.", true);
   }
 
   function attachListeners() {
@@ -396,14 +286,14 @@
       state.started = true;
       attachListeners();
     }
-    ensureStyles();
+    removeLegacyUi();
     const response = await controlMain("start", normalized);
     if (!state.started || generation !== state.lifecycleGeneration) return false;
     if (!response?.ok) {
       await stop();
       throw new Error(response?.error || "The guild-market page bridge could not start.");
     }
-    renderAndFill();
+    fillCurrentStage();
     return true;
   }
 
@@ -424,7 +314,7 @@
       await stop();
       throw new Error(response?.error || "The guild-market page bridge could not update.");
     }
-    renderAndFill();
+    fillCurrentStage();
     return true;
   }
 
@@ -437,7 +327,7 @@
     clearAllTimers();
     state.settings = null;
     state.staged = null;
-    removeOwnedUi();
+    removeLegacyUi();
     if (wasStarted) {
       try {
         await controlMain("stop");
@@ -452,7 +342,7 @@
   function getStatus() {
     return {
       started: state.started,
-      hasSuggestion: Boolean(root.document?.getElementById?.(PANEL_ID)),
+      hasPageUi: false,
       hasStagedItem: Boolean(state.staged),
       filling: Boolean(state.pending),
       validRuleCount: state.settings?.rules?.length || 0,

@@ -6,6 +6,18 @@ const fs = require("node:fs");
 const { test } = require("node:test");
 const assert = require("node:assert/strict");
 const { loadArena } = require("./stat-weights");
+const { getExpeditionMonster } = require("./expedition-monsters");
+
+test("fixed expedition monster presets preserve visible card stats", () => {
+  const shaman = getExpeditionMonster("high-shaman");
+  const elephant = getExpeditionMonster("demon-elephant");
+  assert.equal(shaman.name, "High Shaman");
+  assert.equal(shaman.maxHp, 6459);
+  assert.equal(shaman.armourAbsorbMax, 82);
+  assert.equal(elephant.name, "Demon Elephant");
+  assert.equal(elephant.maxHp, 6349);
+  assert.equal(elephant.armour, 14752);
+});
 
 test("real sim: mirror baseline ~0.5, constitution weighs positive", () => {
   const { arena, sim, weights } = loadArena();
@@ -18,9 +30,11 @@ test("real sim: mirror baseline ~0.5, constitution weighs positive", () => {
   const baseline = arena.combatantFromCharacter(character);
   const result = weights.computeStatWeights({ sim, baseline, iterations: 4000, seed: 7 });
 
-  // The name/maxRounds fixes must hold: a same-named mirror would spuriously read ~0.92.
+  // The mirror must stay fair under the real 15-round Arena rules.
   assert.ok(result.refScore > 0.45 && result.refScore < 0.55, `refScore ${result.refScore}`);
-  assert.equal(result.rows.length, 6);
+  assert.equal(result.mode, "arena");
+  assert.equal(result.maxRounds, 15);
+  assert.equal(result.rows.length, 7);
   for (const r of result.rows) assert.ok(Number.isFinite(r.se), `se finite for ${r.stat}`);
 
   const by = Object.fromEntries(result.rows.map((r) => [r.stat, r.deltaScore]));

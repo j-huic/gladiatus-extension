@@ -5,15 +5,29 @@
   if (!ARENA || root.GladiatusArenaSim) return;
 
   const DEFAULT_ITERATIONS = 500;
-  const DEFAULT_MAX_ROUNDS = 15;
+  const BATTLE_MODES = Object.freeze({
+    arena: Object.freeze({ id: "arena", maxRounds: 15, firstAttacker: "coinflip" }),
+    expedition: Object.freeze({ id: "expedition", maxRounds: 15, firstAttacker: "defender" })
+  });
+  const DEFAULT_MODE = "arena";
 
   function simulateOddsPvP(attacker, defender, options = {}) {
+    return simulateOddsArena(attacker, defender, options);
+  }
+
+  function simulateOddsArena(attacker, defender, options = {}) {
+    return simulateOdds(attacker, defender, { ...options, mode: "arena" });
+  }
+
+  function simulateOddsExpedition(attacker, defender, options = {}) {
+    const monster = options.monsterRules === false ? defender : expeditionMonsterFromStats(defender);
+    return simulateOdds(attacker, monster, { ...options, mode: "expedition" });
+  }
+
+  function simulateOdds(attacker, defender, options = {}) {
     const iterations = Math.max(1, ARENA.parseInteger(options.iterations) || DEFAULT_ITERATIONS);
-    const battleOptions = {
-      maxRounds: ARENA.parseInteger(options.maxRounds) || DEFAULT_MAX_ROUNDS,
-      firstAttacker: options.firstAttacker || "coinflip",
-      random: options.random
-    };
+    const rules = resolveBattleRules(options);
+    const battleOptions = { ...rules, random: options.random };
     let wins = 0;
     let losses = 0;
     let draws = 0;
@@ -25,17 +39,18 @@
       else draws += 1;
     }
 
-    return simulationSummary({ iterations, wins, losses, draws });
+    return simulationSummary({ iterations, wins, losses, draws }, rules);
   }
 
   function simulateBattle(attacker, defender, options = {}) {
     const random = typeof options.random === "function" ? options.random : Math.random;
-    const maxRounds = ARENA.parseInteger(options.maxRounds) || DEFAULT_MAX_ROUNDS;
-    const firstAttackerMode = options.firstAttacker || "coinflip";
+    const rules = resolveBattleRules(options);
+    const maxRounds = rules.maxRounds;
+    const firstAttackerMode = rules.firstAttacker;
     const attackerStart = normalizeCombatant(attacker);
     const defenderStart = normalizeCombatant(defender);
-    const attackerState = { ...attackerStart, hp: attackerStart.maxHp };
-    const defenderState = { ...defenderStart, hp: defenderStart.maxHp };
+    const attackerState = { ...attackerStart, hp: attackerStart.maxHp, combatSide: "attacker" };
+    const defenderState = { ...defenderStart, hp: defenderStart.maxHp, combatSide: "defender" };
     const attackerEffectiveCrit = Math.max(0, attackerState.critChance - defenderState.critAvoidChance);
     const defenderEffectiveCrit = Math.max(0, defenderState.critChance - attackerState.critAvoidChance);
     const rounds = [];
@@ -79,6 +94,9 @@
     }
 
     return {
+      mode: rules.mode,
+      maxRounds: rules.maxRounds,
+      firstAttackerMode: rules.firstAttacker,
       attacker: attackerStart,
       defender: defenderStart,
       rounds,
@@ -129,6 +147,7 @@
   function strikeEvent(attacker, defender, values = {}) {
     return {
       attacker: attacker.name,
+      attackerSide: attacker.combatSide || "",
       defender: defender.name,
       result: values.result || "miss",
       isCrit: Boolean(values.isCrit),
@@ -175,13 +194,16 @@
     return !Number.isFinite(timestamp) || Date.now() - timestamp >= ARENA.selfProfileMaxAgeMs;
   }
 
-  function simulationSummary(result) {
+  function simulationSummary(result, rules = resolveBattleRules()) {
     const iterations = Math.max(1, ARENA.parseInteger(result.iterations));
     const wins = ARENA.parseInteger(result.wins);
     const losses = ARENA.parseInteger(result.losses);
     const draws = ARENA.parseInteger(result.draws);
     return {
       ready: true,
+      mode: rules.mode,
+      maxRounds: rules.maxRounds,
+      firstAttackerMode: rules.firstAttacker,
       iterations,
       wins,
       losses,
@@ -194,10 +216,51 @@
     };
   }
 
+  function resolveBattleRules(options = {}) {
+    const requestedMode = String(options.mode || DEFAULT_MODE).toLowerCase();
+    const preset = BATTLE_MODES[requestedMode] || BATTLE_MODES[DEFAULT_MODE];
+    const requestedFirst = String(options.firstAttacker || "").toLowerCase();
+    const firstAttacker = ["attacker", "defender", "coinflip"].includes(requestedFirst)
+      ? requestedFirst
+      : preset.firstAttacker;
+    return {
+      mode: preset.id,
+      maxRounds: Math.max(1, ARENA.parseInteger(options.maxRounds) || preset.maxRounds),
+      firstAttacker
+    };
+  }
+
+  // Expedition opponents use several live-observed rules that differ from
+  // player character derivation. Callers with raw monster fields can use this
+  // helper before simulateOddsExpedition; already-derived combatants remain valid.
+  function expeditionMonsterFromStats(monster = {}) {
+    const combatant = normalizeCombatant(monster);
+    const level = combatant.level;
+    const strengthBlockValue = Math.max(0, Math.floor(combatant.strength * (level - 57) / 100));
+    const strengthBlockChance = level > 8
+      ? Math.min((strengthBlockValue * 52 / (level - 8)) / 6, 50)
+      : 0;
+    const rawBlock = finiteNumber(monster.blockRaw, combatant.blockChance);
+    const rawCrit = finiteNumber(monster.critRaw, combatant.critChance);
+    return {
+      ...combatant,
+      critChance: clamp(rawCrit, 0, 50),
+      blockChance: clamp(Math.max(rawBlock, strengthBlockChance), 0, 50),
+      critAvoidChance: 0
+    };
+  }
+
+  function finiteNumber(value, fallback = 0) {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : Number(fallback) || 0;
+  }
+
   function totalDamageBySide(rounds, attackerName) {
     return rounds.reduce((totals, round) => {
       for (const strikeRecord of round.strikes || []) {
-        if (strikeRecord.attacker === attackerName) totals.attacker += strikeRecord.finalDamage;
+        if (strikeRecord.attackerSide === "attacker" || (!strikeRecord.attackerSide && strikeRecord.attacker === attackerName)) {
+          totals.attacker += strikeRecord.finalDamage;
+        }
         else totals.defender += strikeRecord.finalDamage;
       }
       return totals;
@@ -252,9 +315,15 @@
   }
 
   root.GladiatusArenaSim = {
+    battleModes: BATTLE_MODES,
+    defaultMode: DEFAULT_MODE,
     defaultIterations: DEFAULT_ITERATIONS,
-    defaultMaxRounds: DEFAULT_MAX_ROUNDS,
+    defaultMaxRounds: BATTLE_MODES[DEFAULT_MODE].maxRounds,
+    expeditionMonsterFromStats,
+    resolveBattleRules,
     simulateBattle,
+    simulateOddsArena,
+    simulateOddsExpedition,
     simulateOddsPvP,
     simulationReadiness
   };

@@ -335,10 +335,10 @@ function renderGuildMarketWorkspace() {
   title.textContent = "Guild Market pricing";
   const description = document.createElement("p");
   description.className = "shell-intro";
-  description.textContent = "Stage an item on the Guild Market page. A matching enabled rule shows its stack calculation beside the price field.";
+  description.textContent = "Stage an item on the Guild Market page. A matching enabled rule changes only the price field automatically.";
   const notice = document.createElement("p");
   notice.className = "notice";
-  notice.textContent = "Matching prices fill automatically and fees are recalculated. The extension never submits the listing.";
+  notice.textContent = "No extra page controls are added. Fees are recalculated, and the extension never submits the listing.";
   page.append(title, description, notice);
 
   const rules = state.helperSettings.features.guildMarket.rules.filter((rule) => rule.enabled !== false);

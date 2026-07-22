@@ -513,6 +513,46 @@ const { schema, score, model, core, arena, sim } = loadGlobals();
   assert.equal(odds.losses, 0);
   assert.equal(odds.draws, 0);
   assert.equal(odds.winRate, 1);
+
+  assert.deepEqual(JSON.parse(JSON.stringify(sim.resolveBattleRules({ mode: "arena" }))), {
+    mode: "arena",
+    maxRounds: 15,
+    firstAttacker: "coinflip"
+  });
+  assert.deepEqual(JSON.parse(JSON.stringify(sim.resolveBattleRules({ mode: "expedition" }))), {
+    mode: "expedition",
+    maxRounds: 15,
+    firstAttacker: "defender"
+  });
+
+  const expeditionOdds = sim.simulateOddsExpedition(
+    { ...base, damageMin: 200, damageMax: 200 },
+    { ...base, name: "Boss" },
+    { iterations: 1, random: sequenceRandom([0]) }
+  );
+  assert.equal(expeditionOdds.mode, "expedition");
+  assert.equal(expeditionOdds.maxRounds, 15);
+  assert.equal(expeditionOdds.firstAttackerMode, "defender");
+
+  const monster = sim.expeditionMonsterFromStats({
+    ...base,
+    name: "Dragon",
+    level: 120,
+    strength: 456,
+    critRaw: 12,
+    blockRaw: 0,
+    critAvoidChance: 25
+  });
+  assert.equal(monster.critChance, 12);
+  assert.ok(monster.blockChance > 22 && monster.blockChance < 23);
+  assert.equal(monster.critAvoidChance, 0);
+
+  const sameName = sim.simulateBattle(
+    { ...base, name: "Mirror", damageMin: 10, damageMax: 10 },
+    { ...base, name: "Mirror", damageMin: 5, damageMax: 5 },
+    { maxRounds: 1, firstAttacker: "attacker", random: sequenceRandom([0, 0, 0.99, 0.99, 0, 0.99, 0, 0, 0.99, 0.99, 0, 0.99]) }
+  );
+  assert.equal(sameName.outcome, "attacker_wins");
 }
 
 {
@@ -603,6 +643,7 @@ const { schema, score, model, core, arena, sim } = loadGlobals();
     "src/shared/helper-settings.js",
     "src/shared/logging/log-core.js",
     "src/shared/logging/log-setup.js",
+    "src/features/smelting/smelting-material-data.js",
     "src/features/auction/auction-schema.js",
     "src/shared/tooltip-parser.js",
     "src/shared/score-model.js",

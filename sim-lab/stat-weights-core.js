@@ -9,11 +9,12 @@
   if (root.GladiatusStatWeights) return;
 
   const STAT_KEYS = ["strength", "dexterity", "agility", "constitution", "charisma", "intelligence"];
+  const WEIGHT_KEYS = [...STAT_KEYS, "armour"];
+  const DEFAULT_ARMOUR_BUMP = 500;
 
-  // High enough that mirror fights resolve by knockout rather than the sim's
-  // rounds-exhausted damage tie-break. Knockouts break the loop early, so a large
-  // cap is cheap. (At the sim default of 15, ~84% of tanky mirror fights never KO.)
-  const DEFAULT_MAX_ROUNDS = 100;
+  // Arena fights end after 15 rounds when neither side is knocked out. Extending
+  // the fight toward a knockout dramatically overvalues HP/constitution.
+  const DEFAULT_MAX_ROUNDS = 15;
 
   // Deterministic, seedable PRNG. Returns a function producing values in [0,1).
   function mulberry32(seed) {
@@ -37,6 +38,14 @@
 
   function levelScale(level) {
     return level > 8 ? 52 / (level - 8) : 0; // crit/block/avoid inactive below level 9
+  }
+
+  function armourAbsorption(armour) {
+    const value = Math.max(0, Number(armour) || 0);
+    return {
+      min: Math.max(0, Math.ceil(value / 74 - (value / 74) / 660 + 1)),
+      max: Math.max(0, Math.floor(value / 66 + value / 660)),
+    };
   }
 
   // Returns a NEW combatant with only the primitives the bumped stat affects
@@ -63,6 +72,11 @@
     } else if (stat === "constitution") {
       c.maxHp = (Number(c.maxHp) || 0) + n * 25; // +25 HP per constitution point
       c.hp = c.maxHp;
+    } else if (stat === "armour") {
+      const beforeAbsorption = armourAbsorption(before);
+      const afterAbsorption = armourAbsorption(after);
+      c.armourAbsorbMin = (Number(c.armourAbsorbMin) || 0) + afterAbsorption.min - beforeAbsorption.min;
+      c.armourAbsorbMax = (Number(c.armourAbsorbMax) || 0) + afterAbsorption.max - beforeAbsorption.max;
     }
     // charisma / intelligence: only the raw field changes; the sim recomputes
     // hit and double-hit from the combatant's raw dex/agi/cha/int fields.
@@ -86,16 +100,33 @@
     const n = options.n != null ? options.n : 10;
     const iterations = options.iterations != null ? options.iterations : 50000;
     const seed = options.seed != null ? options.seed : 12345;
-    const stats = options.stats || STAT_KEYS;
-    const maxRounds = options.maxRounds != null ? options.maxRounds : DEFAULT_MAX_ROUNDS;
-    const firstAttacker = options.firstAttacker || "coinflip";
+    const stats = options.stats || WEIGHT_KEYS;
+    const bumpBy = { armour: DEFAULT_ARMOUR_BUMP, ...(options.bumpBy || {}) };
+    const requestedMode = String(options.mode || "arena").toLowerCase();
+    const mode = requestedMode === "expedition" ? "expedition" : "arena";
+    const resolvedRules = typeof sim.resolveBattleRules === "function"
+      ? sim.resolveBattleRules({ mode, maxRounds: options.maxRounds, firstAttacker: options.firstAttacker })
+      : {
+          mode,
+          maxRounds: options.maxRounds != null ? options.maxRounds : DEFAULT_MAX_ROUNDS,
+          firstAttacker: options.firstAttacker || (mode === "expedition" ? "defender" : "coinflip"),
+        };
+    const maxRounds = resolvedRules.maxRounds;
+    const firstAttacker = resolvedRules.firstAttacker;
 
-    // The fixed mirror opponent. It MUST have a different name from the attacker:
-    // the sim's rounds-exhausted tie-break (totalDamageBySide) attributes damage by
-    // name, so a same-named mirror credits all damage to the attacker (spurious win).
-    const opponent = { ...baseline, name: `${baseline.name || "self"} ◇mirror` };
+    // Arena defaults to a fixed mirror. Expedition requires an explicit target
+    // and applies the monster-only combat derivation once before paired battles.
+    const mirror = { ...baseline, name: `${baseline.name || "self"} ◇mirror` };
+    const suppliedOpponent = options.opponent || null;
+    if (mode === "expedition" && !suppliedOpponent) {
+      throw new Error("Expedition stat weights require a fixed opponent");
+    }
+    const opponent = mode === "expedition" && typeof sim.expeditionMonsterFromStats === "function"
+      ? sim.expeditionMonsterFromStats(suppliedOpponent)
+      : suppliedOpponent || mirror;
+    const opponentName = String(opponent.name || "Opponent");
 
-    const battleOpts = (i) => ({ random: mulberry32(deriveSeed(seed, i)), maxRounds, firstAttacker });
+    const battleOpts = (i) => ({ mode, random: mulberry32(deriveSeed(seed, i)), maxRounds, firstAttacker });
 
     const refScores = new Array(iterations);
     let refSum = 0;
@@ -107,7 +138,8 @@
     const refScore = refSum / iterations;
 
     const rows = stats.map((stat) => {
-      const bumped = bumpCombatant(baseline, stat, n);
+      const bump = Number(bumpBy[stat]) > 0 ? Number(bumpBy[stat]) : n;
+      const bumped = bumpCombatant(baseline, stat, bump);
       let sumD = 0;
       let sumD2 = 0;
       let flips = 0;
@@ -123,8 +155,9 @@
       const se = Math.sqrt(variance / iterations);
       return {
         stat,
+        bump,
         deltaScore: mean,
-        perPoint: mean / n,
+        perPoint: mean / bump,
         se,
         ci95: 1.96 * se,
         flipRate: flips / iterations,
@@ -136,7 +169,43 @@
     for (const r of rows) r.normalized = r.deltaScore / maxAbs;
     rows.sort((a, b) => b.deltaScore - a.deltaScore);
 
-    return { refScore, n, iterations, seed, rows };
+    return { refScore, n, bumpBy, iterations, seed, mode, maxRounds, firstAttacker, opponentName, rows };
+  }
+
+  // Keep gold economics separate from combat simulation. `statValues` is a
+  // stat-keyed record of marginal score gained per trained point, while
+  // `trainingCosts` contains the current gold price of the next point.
+  function calculateTrainingEfficiency(statValues = {}, trainingCosts = {}) {
+    const rows = STAT_KEYS.map((stat) => {
+      const valuePerPoint = Number(statValues[stat]) || 0;
+      const costPerPoint = Number(trainingCosts[stat]);
+      const hasValidCost = Number.isFinite(costPerPoint) && costPerPoint > 0;
+      const valuePerGold = hasValidCost ? valuePerPoint / costPerPoint : null;
+      return {
+        stat,
+        valuePerPoint,
+        costPerPoint: hasValidCost ? costPerPoint : null,
+        valuePerGold,
+        valuePerMillionGold: valuePerGold == null ? null : valuePerGold * 1_000_000,
+        normalized: 0,
+      };
+    });
+
+    const best = Math.max(...rows.map((row) => row.valuePerGold || 0), 0);
+    for (const row of rows) {
+      row.normalized = best > 0 && row.valuePerGold != null ? row.valuePerGold / best : 0;
+    }
+    rows.sort((a, b) => (b.valuePerGold ?? -Infinity) - (a.valuePerGold ?? -Infinity));
+
+    return {
+      bestStat: best > 0 ? rows.find((row) => row.valuePerGold === best)?.stat || null : null,
+      rows,
+    };
+  }
+
+  function trainingEfficiencyFromWeights(result, trainingCosts = {}) {
+    const statValues = Object.fromEntries((result?.rows || []).map((row) => [row.stat, row.perPoint]));
+    return calculateTrainingEfficiency(statValues, trainingCosts);
   }
 
   function formatWeightsTable(result, meta = {}) {
@@ -145,25 +214,44 @@
     const signed = (v) => (v >= 0 ? "+" : "") + v.toFixed(4);
     const header =
       `Stat weights — ${name} level ${level}, ${result.iterations} iters, ` +
-      `seed ${result.seed}, N=${result.n}, mirror baseline ${result.refScore.toFixed(3)}`;
+      `seed ${result.seed}, primary N=${result.n}, armour N=${result.bumpBy?.armour || DEFAULT_ARMOUR_BUMP}, ` +
+      `${result.mode || "arena"} ` +
+      `${result.maxRounds || DEFAULT_MAX_ROUNDS} rounds/${result.firstAttacker || "coinflip"}, ` +
+      `${result.mode === "expedition" ? `vs ${result.opponentName}` : "mirror"} baseline ${result.refScore.toFixed(3)}`;
     const cols =
-      `  ${"stat".padEnd(14)}${`Δscore/+${result.n}`.padEnd(13)}${"±95% CI".padEnd(11)}` +
+      `  ${"stat".padEnd(14)}${"bump".padEnd(8)}${"Δscore".padEnd(13)}${"±95% CI".padEnd(11)}` +
       `${"per-point".padEnd(12)}${"flip%".padEnd(9)}normalized`;
     const lines = result.rows.map(
       (r) =>
-        `  ${r.stat.padEnd(14)}${signed(r.deltaScore).padEnd(13)}` +
+        `  ${r.stat.padEnd(14)}${(`+${r.bump || result.n}`).padEnd(8)}${signed(r.deltaScore).padEnd(13)}` +
         `${("±" + r.ci95.toFixed(4)).padEnd(11)}${r.perPoint.toFixed(5).padEnd(12)}` +
         `${(100 * r.flipRate).toFixed(2).padEnd(9)}${r.normalized.toFixed(2)}`
     );
     return [header, "", cols, ...lines].join("\n");
   }
 
+  function formatTrainingEfficiencyTable(result) {
+    const cols =
+      `  ${"stat".padEnd(14)}${"cost/+1".padEnd(13)}${"score/1M gold".padEnd(17)}normalized`;
+    const lines = result.rows.map((row) => {
+      const cost = row.costPerPoint == null ? "missing" : Math.round(row.costPerPoint).toLocaleString("en-US");
+      const perMillion = row.valuePerMillionGold == null ? "—" : row.valuePerMillionGold.toFixed(5);
+      return `  ${row.stat.padEnd(14)}${cost.padEnd(13)}${perMillion.padEnd(17)}${row.normalized.toFixed(2)}`;
+    });
+    return ["Training efficiency — marginal simulated score per current gold cost", "", cols, ...lines].join("\n");
+  }
+
   root.GladiatusStatWeights = {
     STAT_KEYS,
+    WEIGHT_KEYS,
     mulberry32,
     deriveSeed,
+    armourAbsorption,
     bumpCombatant,
     computeStatWeights,
+    calculateTrainingEfficiency,
+    trainingEfficiencyFromWeights,
     formatWeightsTable,
+    formatTrainingEfficiencyTable,
   };
 })();

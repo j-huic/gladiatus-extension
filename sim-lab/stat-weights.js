@@ -4,6 +4,8 @@
 //
 // Usage:
 //   node sim-lab/stat-weights.js [path-to-self-profile.json] [--iterations N] [--seed S] [--n N]
+//     [--armour-n N] [--mode arena|expedition] [--monster preset-id]
+//     [--training-costs path-to-costs.json]
 //   (default profile: ./self-profile.json next to this script; default N=50000)
 //
 // Export your live scrape from the extension's service-worker DevTools console:
@@ -14,6 +16,7 @@
 const fs = require("node:fs");
 const path = require("node:path");
 const vm = require("node:vm");
+const { getExpeditionMonster } = require("./expedition-monsters");
 
 const EXTENSION_ROOT = path.join(__dirname, "..");
 
@@ -43,13 +46,26 @@ function loadArena(extensionRoot = EXTENSION_ROOT) {
 }
 
 function parseArgs(argv) {
-  const out = { profilePath: null, iterations: undefined, seed: undefined, n: undefined };
+  const out = {
+    profilePath: null,
+    iterations: undefined,
+    seed: undefined,
+    n: undefined,
+    armourN: undefined,
+    mode: "arena",
+    monster: null,
+    trainingCostsPath: null,
+  };
   const rest = argv.slice(2);
   for (let i = 0; i < rest.length; i += 1) {
     const arg = rest[i];
     if (arg === "--iterations" || arg === "-N") out.iterations = Number(rest[(i += 1)]);
     else if (arg === "--seed") out.seed = Number(rest[(i += 1)]);
     else if (arg === "--n") out.n = Number(rest[(i += 1)]);
+    else if (arg === "--armour-n") out.armourN = Number(rest[(i += 1)]);
+    else if (arg === "--mode") out.mode = String(rest[(i += 1)] || "arena").toLowerCase();
+    else if (arg === "--monster") out.monster = rest[(i += 1)];
+    else if (arg === "--training-costs") out.trainingCostsPath = rest[(i += 1)];
     else if (!arg.startsWith("-")) out.profilePath = arg;
   }
   return out;
@@ -89,9 +105,25 @@ function main(argv = process.argv) {
   if (args.iterations) opts.iterations = args.iterations;
   if (args.seed != null) opts.seed = args.seed;
   if (args.n) opts.n = args.n;
+  if (args.armourN) opts.bumpBy = { armour: args.armourN };
+  opts.mode = args.mode;
+  if (args.mode === "expedition") {
+    opts.opponent = getExpeditionMonster(args.monster);
+    if (!opts.opponent) {
+      console.error(`Unknown expedition monster preset: ${args.monster || "(missing)"}.`);
+      process.exit(1);
+    }
+  }
 
   const result = weights.computeStatWeights(opts);
   console.log(weights.formatWeightsTable(result, { name: baseline.name, level: baseline.level }));
+
+  if (args.trainingCostsPath) {
+    const costsRaw = JSON.parse(fs.readFileSync(args.trainingCostsPath, "utf8"));
+    const costs = costsRaw.trainingCosts || costsRaw;
+    const efficiency = weights.trainingEfficiencyFromWeights(result, costs);
+    console.log(`\n${weights.formatTrainingEfficiencyTable(efficiency)}`);
+  }
 }
 
 if (require.main === module) main();

@@ -85,7 +85,7 @@ export function createSettingsView({ render, navigate, clearFeatureCache, clearA
     );
     data.append(
       cacheActions,
-      paragraph("Guild Market calculations are page-local and disappear when the staged item changes, the feature is disabled, or the page closes.", "setting-help")
+      paragraph("Guild Market pricing changes only the native price field after a matching item is staged; it adds no controls to the page.", "setting-help")
     );
 
     const diagnostics = document.createElement("section");
