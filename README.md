@@ -45,7 +45,7 @@ dist/                generated Chrome-loadable artifacts
 
 ## Guild-Market-Only Release
 
-The public release can be built as a physically separate, single-purpose extension. This artifact contains only automatic Mini-Pumpkin Guild Market pricing; it does not package the auction, arena, scanner, simulation, diagnostics, or generic popup modules.
+The public release can be built as a physically separate, single-purpose extension. This artifact contains only automatic Mini-Pumpkin Guild Market pricing with a 24-hour listing duration; it does not package the auction, arena, scanner, simulation, diagnostics, or generic popup modules.
 
 ```sh
 npm run build:guild-market
@@ -54,9 +54,9 @@ npm run build:guild-market
 The command creates:
 
 - `dist/guild-market/` for **Load unpacked** testing;
-- `dist/gladiatus-guild-market-1.0.0.zip` as the reproducible release-code ZIP.
+- `dist/gladiatus-guild-market-1.0.2.zip` as the reproducible release-code ZIP.
 
-The guild-only popup has one enable switch and one unit-price field. Fresh installs default to off. If this package updates the full extension under the same extension ID, it imports only the existing Mini-Pumpkin enabled state and unit price into the dedicated `glad-guild-market-settings-v1` record. Other stored feature data is left untouched but no code capable of using it is included in the artifact.
+The guild-only popup has one enable switch and one unit-price field. Fresh installs default to on because automatic Mini-Pumpkin pricing is the package's only feature; users can still disable it at any time. If this package updates the full extension under the same extension ID, it imports only the existing Mini-Pumpkin enabled state and unit price into the dedicated `glad-guild-market-settings-v1` record. Other stored feature data is left untouched but no code capable of using it is included in the artifact.
 
 Verify the allowlisted package boundary with:
 

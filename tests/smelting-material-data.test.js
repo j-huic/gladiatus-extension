@@ -35,5 +35,8 @@ assert.deepEqual(
   }
 );
 assert.deepEqual({ ...data.materialsFor("prefix", "Unknown affix") }, {});
+assert.ok(data.materialNames.includes("Dragon Scale"));
+assert.ok(data.materialNames.includes("Waters of Oblivion"));
+assert.equal(new Set(data.materialNames).size, data.materialNames.length, "material names are unique");
 
 console.log("smelting material data tests passed");

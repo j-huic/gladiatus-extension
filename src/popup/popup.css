@@ -204,6 +204,55 @@ summary:focus-visible {
   padding: 8px;
 }
 
+.smelting-material-controls {
+  display: grid;
+  gap: 8px;
+}
+
+.smelting-material-search {
+  color: #d8c294;
+  display: grid;
+  font-weight: 700;
+  gap: 4px;
+}
+
+.smelting-material-search input,
+.smelting-material-row select {
+  background: #302214;
+  border: 1px solid #60451f;
+  color: #fff1c4;
+  font: inherit;
+  min-height: 26px;
+  padding: 3px 6px;
+}
+
+.smelting-material-list {
+  border: 1px solid #43301c;
+  max-height: 230px;
+  overflow: auto;
+}
+
+.smelting-material-row {
+  align-items: center;
+  border-bottom: 1px solid #332416;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: 12px 1fr 110px;
+  min-height: 34px;
+  padding: 4px 6px;
+}
+
+.smelting-material-row:last-child {
+  border-bottom: 0;
+}
+
+.smelting-material-marker {
+  border: 1px solid #a67938;
+  border-radius: 50%;
+  height: 12px;
+  width: 12px;
+}
+
 .shell-page {
   display: grid;
   gap: 10px;

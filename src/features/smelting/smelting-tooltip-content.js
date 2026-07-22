@@ -2,7 +2,8 @@
 // the MAIN-world bridge because Gladiatus caches parsed tooltips in page jQuery.
 (() => {
   const root = typeof globalThis !== "undefined" ? globalThis : window;
-  const VERSION = "smelting-tooltip-content-v2";
+  const VERSION = "smelting-tooltip-content-v3";
+  const MATERIAL_COLORS_ATTRIBUTE = "data-glad-smelting-material-colors";
   const CONTROL_EVENTS = Object.freeze({
     start: "glad-smelting-tooltip-start-v1",
     refresh: "glad-smelting-tooltip-refresh-v1",
@@ -19,18 +20,35 @@
     root.dispatchEvent(new root.Event(eventName));
   }
 
+  function writeMaterialColors(settings) {
+    const colors = settings?.materialColors && typeof settings.materialColors === "object"
+      ? settings.materialColors
+      : {};
+    const html = root.document?.documentElement;
+    if (typeof html?.setAttribute === "function") html.setAttribute(MATERIAL_COLORS_ATTRIBUTE, JSON.stringify(colors));
+  }
+
+  function clearMaterialColors() {
+    const html = root.document?.documentElement;
+    if (typeof html?.removeAttribute === "function") html.removeAttribute(MATERIAL_COLORS_ATTRIBUTE);
+  }
+
   const controller = Object.freeze({
     version: VERSION,
-    async start() {
+    async start(settings = {}) {
       active = true;
+      writeMaterialColors(settings);
       send("start");
     },
-    async update() {
-      if (active) send("refresh");
+    async update(settings = {}) {
+      if (!active) return;
+      writeMaterialColors(settings);
+      send("refresh");
     },
     async stop() {
-      active = false;
       send("stop");
+      clearMaterialColors();
+      active = false;
     },
     getStatus() {
       return { active };

@@ -11,6 +11,7 @@
   const VERSION = 1;
   const ONBOARDING_VERSION = 1;
   const FEATURE_IDS = ["auction", "arena", "smelting", "guildMarket"];
+  const SMELTING_COLOR_IDS = new Set(["red", "orange", "yellow", "green", "blue"]);
 
   const LEGACY_STORAGE_KEYS = [
     "glad-ah-custom-definitions-v1",
@@ -61,12 +62,9 @@
     guildMarket: Object.freeze([])
   });
 
-  const DEFAULT_GUILD_RULE = Object.freeze({
-    id: "mini-pumpkin",
-    itemName: "Mini-Pumpkin",
-    pricePerUnit: 100000,
-    enabled: true
-  });
+  const DEFAULT_GUILD_RULES = Object.freeze([
+    Object.freeze({ id: "mini-pumpkin", itemName: "Mini-Pumpkin", pricePerUnit: 100000, enabled: true })
+  ]);
 
   function clone(value) {
     if (value == null || typeof value !== "object") return value;
@@ -102,12 +100,13 @@
           quickFight: true
         },
         smelting: {
-          enabled: false
+          enabled: false,
+          materialColors: {}
         },
         guildMarket: {
           enabled: false,
           mode: "automatic",
-          rules: [clone(DEFAULT_GUILD_RULE)]
+          rules: DEFAULT_GUILD_RULES.map(clone)
         }
       },
       diagnostics: { enabled: false }
@@ -133,6 +132,17 @@
 
   function normalizeItemName(value) {
     return String(value || "").trim().replace(/\s+/g, " ");
+  }
+
+  function normalizeMaterialColors(value) {
+    if (!isObject(value)) return {};
+    const colors = {};
+    for (const [rawName, rawColor] of Object.entries(value)) {
+      const material = normalizeItemName(rawName).slice(0, 100);
+      if (!material || !SMELTING_COLOR_IDS.has(rawColor)) continue;
+      colors[material] = rawColor;
+    }
+    return colors;
   }
 
   function normalizeRuleId(value, itemName, index) {
@@ -227,7 +237,8 @@
           quickFight: normalizeBoolean(rawArena.quickFight, fallbackArena.quickFight)
         },
         smelting: {
-          enabled: normalizeBoolean(rawSmelting.enabled, fallbackSmelting.enabled)
+          enabled: normalizeBoolean(rawSmelting.enabled, fallbackSmelting.enabled),
+          materialColors: normalizeMaterialColors(rawSmelting.materialColors)
         },
         guildMarket: {
           enabled: normalizeBoolean(rawGuild.enabled, fallbackGuild.enabled),

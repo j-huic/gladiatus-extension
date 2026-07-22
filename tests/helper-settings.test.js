@@ -59,7 +59,9 @@ async function testSettings() {
   assert.deepEqual(Object.values(fresh.features).map((feature) => feature.enabled), [false, false, false, false]);
   assert.equal(fresh.features.arena.quickFight, true);
   assert.equal(fresh.features.guildMarket.mode, "automatic");
-  assert.equal(fresh.features.guildMarket.rules[0].pricePerUnit, 100000);
+  assert.deepEqual(fresh.features.guildMarket.rules, [
+    { id: "mini-pumpkin", itemName: "Mini-Pumpkin", pricePerUnit: 100000, enabled: true }
+  ]);
 
   const legacy = plain(settings.legacyDefaults());
   assert.equal(legacy.onboarding.completed, true);
@@ -93,6 +95,7 @@ async function testSettings() {
   assert.deepEqual(normalized.features.guildMarket.rules, [
     { id: "a", itemName: "Mini Pumpkin", pricePerUnit: 250, enabled: false }
   ], "invalid and duplicate normalized rules are rejected");
+
 
   const freshArea = fakeStorage();
   const initializedFresh = await settings.get({ storageArea: freshArea });

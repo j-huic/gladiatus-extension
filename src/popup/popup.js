@@ -335,7 +335,7 @@ function renderGuildMarketWorkspace() {
   title.textContent = "Guild Market pricing";
   const description = document.createElement("p");
   description.className = "shell-intro";
-  description.textContent = "Stage an item on the Guild Market page. A matching enabled rule changes only the price field automatically.";
+  description.textContent = "Stage an item on the Guild Market page. A matching enabled rule changes the price and selects a 24-hour duration automatically.";
   const notice = document.createElement("p");
   notice.className = "notice";
   notice.textContent = "No extra page controls are added. Fees are recalculated, and the extension never submits the listing.";

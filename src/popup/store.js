@@ -67,6 +67,7 @@ export const state = {
   popupState: normalizePopupState(),
   helperSettings: null,
   shellPage: "home",
+  smeltingMaterialQuery: "",
   guildRuleDraft: null,
   openFeatureDetails: {},
   filterValuesByView: {},

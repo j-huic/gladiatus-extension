@@ -1,4 +1,11 @@
-import { FEATURE_SETTINGS, featureModules, nodes, setStatus } from "../runtime.js";
+import {
+  FEATURE_SETTINGS,
+  SMELTING_DATA,
+  SMELTING_TOOLTIP_MODEL,
+  featureModules,
+  nodes,
+  setStatus
+} from "../runtime.js";
 import { state } from "../store.js";
 
 const FEATURE_DEFINITIONS = [
@@ -91,7 +98,7 @@ export function createSettingsView({ render, navigate, clearFeatureCache, clearA
     );
     data.append(
       cacheActions,
-      paragraph("Guild Market pricing changes only the native price field after a matching item is staged; it adds no controls to the page.", "setting-help")
+      paragraph("Guild Market pricing changes only the native price and duration fields after a matching item is staged; it adds no controls to the page.", "setting-help")
     );
 
     const diagnostics = document.createElement("section");
@@ -161,7 +168,7 @@ export function createSettingsView({ render, navigate, clearFeatureCache, clearA
     advanced.dataset.featureDetails = definition.id;
     advanced.open = Boolean(state.openFeatureDetails[definition.id]);
     const summary = document.createElement("summary");
-    summary.textContent = definition.id === "guildMarket" ? "Pricing rules" : definition.id === "smelting" ? "How it works" : "Advanced options";
+    summary.textContent = definition.id === "guildMarket" ? "Pricing rules" : definition.id === "smelting" ? "Material colors" : "Advanced options";
     advanced.append(summary);
 
     if (definition.capabilities.length) {
@@ -173,6 +180,8 @@ export function createSettingsView({ render, navigate, clearFeatureCache, clearA
       advanced.append(list);
     } else if (definition.id === "guildMarket") {
       advanced.append(renderGuildMarketOptions(feature, enabled));
+    } else if (definition.id === "smelting") {
+      advanced.append(renderSmeltingOptions(feature, enabled));
     } else {
       advanced.append(paragraph("Material rows are displayed only when both the item title and its affix material data are known. The extension does not alter items or interact with the game.", "setting-help"));
     }
@@ -185,6 +194,72 @@ export function createSettingsView({ render, navigate, clearFeatureCache, clearA
       card.append(actions);
     }
     return card;
+  }
+
+  function renderSmeltingOptions(feature, parentEnabled) {
+    const container = document.createElement("div");
+    container.className = "smelting-material-controls";
+    const materialNames = SMELTING_DATA?.materialNames || [];
+    const colorOptions = SMELTING_TOOLTIP_MODEL?.materialColorOptions || [];
+
+    container.append(paragraph(
+      "Choose a color for materials you want to spot. Colored material rows appear at the bottom of native item tooltips; unmarked materials remain neutral.",
+      "setting-help"
+    ));
+
+    const searchLabel = document.createElement("label");
+    searchLabel.className = "smelting-material-search";
+    searchLabel.append(document.createTextNode("Search materials"));
+    const search = document.createElement("input");
+    search.type = "search";
+    search.placeholder = "Type a material name";
+    search.value = state.smeltingMaterialQuery;
+    search.setAttribute("aria-label", "Search smelting materials");
+    searchLabel.append(search);
+    container.append(searchLabel);
+
+    const list = document.createElement("div");
+    list.className = "smelting-material-list";
+    list.setAttribute("aria-label", "Smelting materials");
+    container.append(list);
+
+    const renderList = () => {
+      const query = state.smeltingMaterialQuery.trim().toLocaleLowerCase();
+      const matches = materialNames.filter((material) => material.toLocaleLowerCase().includes(query));
+      list.replaceChildren();
+      for (const material of matches) {
+        const row = document.createElement("label");
+        row.className = "smelting-material-row";
+        const marker = document.createElement("span");
+        marker.className = "smelting-material-marker";
+        const selectedColor = feature.materialColors?.[material] || "";
+        marker.style.backgroundColor = colorOptions.find((option) => option.id === selectedColor)?.value || "transparent";
+        marker.setAttribute("aria-hidden", "true");
+        const name = document.createElement("span");
+        name.textContent = material;
+        const select = document.createElement("select");
+        select.value = selectedColor;
+        select.disabled = !parentEnabled;
+        select.setAttribute("aria-label", `${material} tooltip color`);
+        select.append(new Option("No color", ""));
+        for (const option of colorOptions) select.append(new Option(option.label, option.id));
+        select.addEventListener("change", async () => {
+          const materialColors = { ...(state.helperSettings.features.smelting.materialColors || {}) };
+          if (select.value) materialColors[material] = select.value;
+          else delete materialColors[material];
+          await updateFeature("smelting", { materialColors });
+        });
+        row.append(marker, name, select);
+        list.append(row);
+      }
+      if (!matches.length) list.append(paragraph("No matching materials.", "setting-help"));
+    };
+    search.addEventListener("input", () => {
+      state.smeltingMaterialQuery = search.value;
+      renderList();
+    });
+    renderList();
+    return container;
   }
 
   function renderCapability(featureId, capability, title, help, feature, parentEnabled) {
@@ -216,7 +291,7 @@ export function createSettingsView({ render, navigate, clearFeatureCache, clearA
     const mode = document.createElement("strong");
     mode.textContent = "Fill automatically";
     modeRow.append(modeCopy, mode);
-    container.append(modeRow, paragraph("A matching rule immediately fills only the price field and recalculates fees; it never submits the listing.", "setting-help"));
+    container.append(modeRow, paragraph("A matching rule immediately fills the price, selects a 24-hour duration, and recalculates fees; it never submits the listing.", "setting-help"));
 
     const rules = document.createElement("div");
     rules.className = "rule-list";
@@ -259,7 +334,7 @@ export function createSettingsView({ render, navigate, clearFeatureCache, clearA
     name.name = "guild-item-name";
     name.type = "text";
     name.value = draft.itemName || "";
-    name.placeholder = "Exact item name";
+    name.placeholder = "Item-name substring";
     name.disabled = !parentEnabled;
     const nameLabel = document.createElement("label");
     nameLabel.append(document.createTextNode("Item name"), name);
@@ -415,7 +490,7 @@ export function createSettingsView({ render, navigate, clearFeatureCache, clearA
     const currentRules = state.helperSettings.features.guildMarket.rules || [];
 
     if (!itemName) {
-      setStatus("Pricing rule needs an exact item name.");
+      setStatus("Pricing rule needs an item-name substring.");
       return;
     }
     if (!Number.isSafeInteger(pricePerUnit) || pricePerUnit <= 0) {

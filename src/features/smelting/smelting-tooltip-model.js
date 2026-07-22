@@ -6,6 +6,16 @@
   const VERSION = "smelting-tooltip-model-v1";
   const DATA = root.GladiatusSmeltingMaterialData;
   const MATERIALS_HEADER = "Smelting materials";
+  const MATERIAL_COLOR_OPTIONS = Object.freeze([
+    Object.freeze({ id: "red", label: "Red", value: "#FF5A5A" }),
+    Object.freeze({ id: "orange", label: "Orange", value: "#FF9B3D" }),
+    Object.freeze({ id: "yellow", label: "Yellow", value: "#F5D547" }),
+    Object.freeze({ id: "green", label: "Green", value: "#58C56B" }),
+    Object.freeze({ id: "blue", label: "Blue", value: "#6AA9FF" })
+  ]);
+  const MATERIAL_COLORS = Object.freeze(Object.fromEntries(
+    MATERIAL_COLOR_OPTIONS.map((option) => [option.id, option.value])
+  ));
 
   if (!DATA) throw new Error("GladiatusSmeltingMaterialData must load before GladiatusSmeltingTooltipModel.");
   if (root.GladiatusSmeltingTooltipModel?.version === VERSION) return;
@@ -56,7 +66,11 @@
     return Array.isArray(column) && column.some((row) => rowText(row) === MATERIALS_HEADER);
   }
 
-  function appendMaterials(rawTooltip) {
+  function colorForMaterial(materialColors, material) {
+    return MATERIAL_COLORS[materialColors?.[material]] || "#DDD";
+  }
+
+  function appendMaterials(rawTooltip, options = {}) {
     const item = itemFromPayload(rawTooltip);
     if (!item || !item.hasMaterials || hasMaterialsBlock(item.payload[0])) {
       return Object.freeze({ changed: false, item, payload: item?.payload || null });
@@ -64,7 +78,7 @@
 
     item.payload[0].push([MATERIALS_HEADER, "#BA9700"]);
     for (const [material, quantity] of Object.entries(item.materials)) {
-      item.payload[0].push([`${quantity} × ${material}`, "#DDD"]);
+      item.payload[0].push([`${quantity} × ${material}`, colorForMaterial(options.materialColors, material)]);
     }
     return Object.freeze({ changed: true, item, payload: item.payload });
   }
@@ -72,6 +86,8 @@
   root.GladiatusSmeltingTooltipModel = Object.freeze({
     version: VERSION,
     materialsHeader: MATERIALS_HEADER,
+    materialColorOptions: MATERIAL_COLOR_OPTIONS,
+    colorForMaterial,
     parsePayload,
     itemFromPayload,
     appendMaterials,

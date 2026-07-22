@@ -4,12 +4,14 @@ export const MODEL = window.GladiatusAuctionModel || null;
 export const CORE = window.GladiatusAuctionCore || null;
 export const ARENA = window.GladiatusArenaCore || null;
 export const ARENA_SIM = window.GladiatusArenaSim || null;
+export const SMELTING_DATA = window.GladiatusSmeltingMaterialData || null;
+export const SMELTING_TOOLTIP_MODEL = window.GladiatusSmeltingTooltipModel || null;
 export const FEATURE_SETTINGS = window.GladiatusFeatureSettings || window.GladiatusHelperSettings || null;
 
 export const featureModules = {
   auction: Boolean(SCHEMA && SCORE && MODEL && CORE),
   arena: Boolean(SCORE && ARENA && ARENA_SIM),
-  smelting: true,
+  smelting: Boolean(SMELTING_DATA && SMELTING_TOOLTIP_MODEL),
   guildMarket: true
 };
 

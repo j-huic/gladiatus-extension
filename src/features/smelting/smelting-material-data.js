@@ -10,6 +10,10 @@
   const EMPTY_MATERIALS = Object.freeze({});
   const PREFIX_NAMES = Object.freeze(Object.keys(DATA.prefixes).sort((left, right) => right.length - left.length));
   const SUFFIX_NAMES = Object.freeze(Object.keys(DATA.suffixes).sort((left, right) => right.length - left.length));
+  const MATERIAL_NAMES = Object.freeze(Array.from(new Set(
+    [...Object.values(DATA.prefixes), ...Object.values(DATA.suffixes)]
+      .flatMap((materials) => Object.keys(materials))
+  )).sort((left, right) => left.localeCompare(right)));
 
   function normalizeName(value) {
     return String(value || "").replace(/\s+/g, " ").trim().toLocaleLowerCase();
@@ -56,6 +60,7 @@
       revision: "d78220304973a8957e49949e1b4f1a0cfefb6082",
       license: "MIT"
     }),
+    materialNames: MATERIAL_NAMES,
     materialsFor,
     materialsForItem,
     affixesForTitle

@@ -7,6 +7,7 @@
   const pageDocument = root.document || null;
   const ITEM_SELECTOR = "[data-tooltip][class*='item-i-']";
   const ENRICHED_ATTRIBUTE = "data-glad-smelting-tooltip-version";
+  const MATERIAL_COLORS_ATTRIBUTE = "data-glad-smelting-material-colors";
   const CONTROL_EVENTS = Object.freeze({
     start: "glad-smelting-tooltip-start-v1",
     refresh: "glad-smelting-tooltip-refresh-v1",
@@ -42,10 +43,21 @@
     });
   }
 
+  function materialColors() {
+    const rawColors = pageDocument?.documentElement?.getAttribute?.(MATERIAL_COLORS_ATTRIBUTE);
+    if (!rawColors) return {};
+    try {
+      const parsed = JSON.parse(rawColors);
+      return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+    } catch (_error) {
+      return {};
+    }
+  }
+
   function enrichElement(element) {
     if (!element?.matches?.(ITEM_SELECTOR) || element.getAttribute(ENRICHED_ATTRIBUTE) === VERSION) return false;
     const cache = tooltipCacheFor(element);
-    const enriched = MODEL.appendMaterials(cache || element.getAttribute("data-tooltip"));
+    const enriched = MODEL.appendMaterials(cache || element.getAttribute("data-tooltip"), { materialColors: materialColors() });
     if (!enriched.changed) return false;
 
     rememberOriginal(element);
@@ -92,6 +104,12 @@
     return count;
   }
 
+  function refresh() {
+    if (!active) return 0;
+    restoreAll();
+    return scan();
+  }
+
   function stop() {
     active = false;
     observer?.disconnect();
@@ -101,7 +119,7 @@
 
   root.addEventListener?.(CONTROL_EVENTS.start, start);
   root.addEventListener?.(CONTROL_EVENTS.refresh, () => {
-    if (active) scan();
+    refresh();
   });
   root.addEventListener?.(CONTROL_EVENTS.stop, stop);
 
@@ -109,6 +127,7 @@
     version: VERSION,
     start,
     stop,
+    refresh,
     scan,
     getStatus() {
       return { active, enrichedItems: originals.size };
